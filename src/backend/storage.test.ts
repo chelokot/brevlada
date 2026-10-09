@@ -7,7 +7,7 @@ import { matches, message } from "../models";
 import { event } from "../models/calendar";
 import { groups } from "../models/senders";
 import type { Reservation } from "../models/ticket";
-import { isFresh, now, SOURCES } from "./avatars";
+import { isFresh, now, SOURCES } from "./avatar-cache";
 import { Storage } from "./storage";
 
 const RUST_SCHEMA = `

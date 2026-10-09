@@ -5,21 +5,18 @@ import { address as normalize } from "../models/senders";
 import { AVATAR_PIXELS, ICON_PIXELS } from "../theme";
 import * as accounts from "./accounts";
 import * as http from "./http";
+import { type Source } from "./avatar-cache";
 import { brandOf, isConsumer } from "./sender-domains";
 
-export const TTL = 30 * 24 * 60 * 60;
-export const MISS_TTL = 7 * 24 * 60 * 60;
 const USERINFO = "https://www.googleapis.com/oauth2/v3/userinfo";
 const PEOPLE = "https://people.googleapis.com/v1";
 const READ_MASK = "emailAddresses,photos";
-export const SOURCES = "google,gravatar,icons-fitted-padded15";
 const FAVICONS = "https://www.google.com/s2/favicons";
 const ICON_HORSE = "https://icon.horse/icon";
 const MIN_ICON = 32;
 const GOOD_ICON = 128;
 const WHITE: Colour = [255, 255, 255];
 
-export type Source = "google" | "gravatar" | "favicon" | "none";
 
 export interface Credential {
   account: Account;
@@ -325,9 +322,4 @@ export function isImage(data: Uint8Array) {
   );
 }
 
-export const now = () => Math.floor(Date.now() / 1000);
 
-export function isFresh(found: boolean, fetchedAt: number, now: number) {
-  const age = now - fetchedAt;
-  return age >= 0 && age < (found ? TTL : MISS_TTL);
-}

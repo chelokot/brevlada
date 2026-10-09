@@ -1,5 +1,6 @@
 import type { AvatarQueue } from "./avatar-queue";
-import { isFresh, lookup, now } from "./avatars";
+import { isFresh, now } from "./avatar-cache";
+import { lookup } from "./avatars";
 import type { Emit } from "./protocol";
 import type { Storage } from "./storage";
 

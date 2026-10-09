@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import Gdk from "gi://Gdk?version=4.0";
 import GLib from "gi://GLib?version=2.0";
 import type { Account } from "../models";
+import { isFresh, MISS_TTL, TTL } from "./avatar-cache";
 import {
   background,
   decode,
@@ -9,15 +10,12 @@ import {
   faviconDomains,
   faviconUrls,
   gravatarUrl,
-  isFresh,
   isGoogle,
   isImage,
-  MISS_TTL,
   photoUrl,
   pictureUrl,
   plate,
   sized,
-  TTL,
 } from "./avatars";
 
 type Rgba = [number, number, number, number];

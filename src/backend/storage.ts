@@ -9,7 +9,7 @@ import { flaggedState, readState, type SenderAction } from "../models/sender-act
 import { key } from "../models/senders";
 import { parse as parseTickets } from "../models/ticket";
 import { MESSAGE_LIMIT } from "../theme";
-import { now, SOURCES, type Source } from "./avatars";
+import { now, SOURCES, type Source } from "./avatar-cache";
 import { ensureDraftId, type Flags } from "./mail-sync";
 import { normalizeMessageId } from "./parser";
 
