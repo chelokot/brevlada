@@ -43,7 +43,7 @@ export interface State {
   activeThreadRow: ActiveRow;
   senderPane: SenderPane;
   selected: number[];
-  nextMessage: [timestamp: number, uid: number] | null;
+  nextMessage: [sender: number, thread: number] | null;
   searchMessage: [uid: number, messageId: string] | null;
   searchSender: SenderMatches | null;
   deferredReadSort: Set<number>;
@@ -113,3 +113,5 @@ export interface State {
   searchSnapshots: Lane<Message[] | null>;
   searchRefreshPending: Lane<Flag>;
 }
+
+export const messageKey = ({ uid, messageId }: Message) => `${uid}:${messageId}`;

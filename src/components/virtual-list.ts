@@ -88,6 +88,12 @@ export function replace(list: Gtk.ListView, count: number, selected: number | nu
 
 export const update = (list: Gtk.ListView, rows: Row[], changed: number[], selected: number | null) => updateOwned(list, [...rows], changed, selected);
 
+export function replaceItem(list: Gtk.ListView, position: number, row: Row) {
+  const object = new GObject.Object();
+  rows.set(object, row);
+  model(list).splice(position, 1, [object]);
+}
+
 type Match = [old: number, next: number];
 
 function longestIncreasing(matches: Match[]) {
@@ -112,7 +118,7 @@ export function updateOwned(list: Gtk.ListView, next: Row[], changed: number[], 
   const root = list.get_root();
   const focus = root && root.get_focus();
   const restoreFocus = !!focus && (focus === list || focus.is_ancestor(list)) && !(focus instanceof Gtk.Popover) && focus.get_ancestor(Gtk.Popover.$gtype) === null;
-  if (root && restoreFocus) root.set_focus(list);
+  if (root && restoreFocus) Gtk.Root.prototype.set_focus.call(root, list);
   const store = model(list);
   const objects = Array.from({ length: store.get_n_items() }, (_, position) => store.get_item(position)!);
   const old = objects.map((object) => rows.get(object)!.key);
