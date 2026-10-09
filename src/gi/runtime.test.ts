@@ -90,6 +90,18 @@ describe("objects", () => {
     expect(activations).toBe(1);
   });
 
+  test("objects passed inside arrays keep their wrapper identity", () => {
+    const store = new Gio.ListStore({ itemType: GObject.Object.$gtype });
+    const rows = new WeakMap<GObject.Object, string>();
+    (() => {
+      const item = new GObject.Object();
+      rows.set(item, "row");
+      store.splice(0, 0, [item]);
+    })();
+    Bun.gc(true);
+    expect(rows.get(store.get_item(0)!)).toBe("row");
+  });
+
   test("unreferenced wrappers are collected", async () => {
     const finalized = new FinalizationRegistry<number>(() => collected++);
     let collected = 0;

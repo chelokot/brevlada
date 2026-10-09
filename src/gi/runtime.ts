@@ -381,7 +381,10 @@ function compileFunction(info: Info, finish: () => Info | null, promised = false
   const call = CFunction({ ptr: functionAddress(info), args: ffiArgs, returns: result.ffi });
   const visible = args.flatMap((arg, index) => (arg.hidden || arg.direction === Direction.OUT ? [] : [index]));
   const outputs = args.flatMap((arg, index) => (arg.hidden || arg.direction === Direction.IN ? [] : [index]));
-  const objects = visible.flatMap((index, position) => (args[index]!.desc.kind === "object" ? [position] : []));
+  const objects = visible.flatMap((index, position) => {
+    const { desc } = args[index]!;
+    return desc.kind === "object" || ((desc.kind === "array" || desc.kind === "list") && desc.item.kind === "object") ? [position] : [];
+  });
   const asyncPosition = visible.findLastIndex((index, position) => {
     const { desc, scope } = args[index]!;
     return (desc.kind === "callback" && scope === Scope.ASYNC) || (position === visible.length - 1 && desc.kind === "struct" && desc.gtype === closureType);
@@ -452,7 +455,7 @@ function compileFunction(info: Info, finish: () => Info | null, promised = false
     for (const item of keep) if (typeof item === "function") item();
     for (const id of scoped) callbacks.delete(id);
     if (method && this instanceof ObjectBase) syncStrength(this);
-    for (const position of objects) if (values[position] instanceof ObjectBase) syncStrength(values[position] as Instance);
+    for (const position of objects) for (const value of [values[position]].flat()) syncInstance(value);
     if (throws) takeError(slots.subarray(args.length));
     const lengthOf = (desc: Desc) => (desc.kind === "array" && desc.length >= 0 ? Number(readSlot(args[desc.length]!.desc, slotAddress, desc.length * 8)) : -1);
     const returned = result.kind === "void" ? [] : [fromNative(result, raw, transfer, lengthOf(result))];
