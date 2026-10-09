@@ -78,13 +78,14 @@ function guarded<T>(fn: () => T) {
 type Desc =
   | { kind: "void" | "bool" | "gtype" | "unichar" | "string" | "pointer" | "error" | "variant" | "param"; ffi: FFITypeOrString }
   | { kind: "number" | "enum"; ffi: FFITypeOrString }
-  | { kind: "object"; ffi: "ptr"; info: Info }
+  | { kind: "object"; ffi: "ptr"; info: Info; fundamental: boolean }
   | { kind: "struct"; ffi: "ptr"; info: Info; gtype: number; size: number; byValue: boolean }
   | { kind: "callback"; ffi: "ptr"; info: Info }
   | { kind: "array"; ffi: "ptr"; item: Desc; length: number; fixed: number; zero: boolean }
   | { kind: "list"; ffi: "ptr"; item: Desc; single: boolean };
 type ArrayDesc = Extract<Desc, { kind: "array" }>;
 type StructDesc = Extract<Desc, { kind: "struct" }>;
+type ObjectDesc = Extract<Desc, { kind: "object" }>;
 
 function describe(type: Info): Desc {
   const tag = gi.gi_type_info_get_tag(type);
@@ -125,7 +126,7 @@ function describe(type: Info): Desc {
   const gtype = gi.gi_registered_type_info_get_g_type(info);
   if (gtype === GType.PARAM) return { kind: "param", ffi: "ptr" };
   if (gtype === GType.VARIANT) return { kind: "variant", ffi: "ptr" };
-  if (kind === infoTypes.object || kind === infoTypes.interface) return { kind: "object", ffi: "ptr", info };
+  if (kind === infoTypes.object || kind === infoTypes.interface) return { kind: "object", ffi: "ptr", info, fundamental: kind === infoTypes.object && gi.gi_object_info_get_fundamental(info) !== 0 };
   const size = kind === infoTypes.union ? gi.gi_union_info_get_size(info) : gi.gi_struct_info_get_size(info);
   return { kind: "struct", ffi: "ptr", info, gtype: gtype === GType.NONE ? 0 : gtype, size, byValue: !gi.gi_type_info_is_pointer(type) };
 }
@@ -241,7 +242,7 @@ function fromNative(desc: Desc, raw: Native, transfer: number, length = -1): unk
       return value;
     }
     case "object":
-      return wrapInstance(raw as Pointer | null, transfer === Transfer.EVERYTHING, desc.info);
+      return wrapInstance(raw as Pointer | null, transfer === Transfer.EVERYTHING, desc);
     case "variant":
       return wrapVariant(raw as Pointer | null, transfer === Transfer.EVERYTHING);
     case "struct":
@@ -321,16 +322,39 @@ function functionAddress(info: Info) {
   return Number(out[0]) as Pointer;
 }
 
+const simpleKinds = new Set(["void", "number", "enum", "gtype", "bool", "pointer", "string", "object", "variant", "struct"]);
+const simple = (desc: Desc) => simpleKinds.has(desc.kind) && !(desc.kind === "struct" && desc.gtype === closureType);
+const syncInstance = (value: unknown) => value instanceof ObjectBase && syncStrength(value);
+
+function compileFast(info: Info, method: boolean, args: ArgPlan[], result: Desc, transfer: number): Fn {
+  const ffiArgs: FFITypeOrString[] = [...(method ? ["ptr" as const] : []), ...args.map((arg) => (arg.desc.kind === "string" ? "cstring" : arg.desc.ffi))];
+  const call = CFunction({ ptr: functionAddress(info), args: ffiArgs, returns: result.ffi });
+  const names = args.map((_, index) => `a${index}`);
+  const convert = ({ desc }: ArgPlan, name: string) =>
+    desc.kind === "bool" ? `${name} ? 1 : 0` : ["object", "variant", "struct"].includes(desc.kind) ? `${name} == null ? null : ${name}.ptr` : `${name} ?? ${["string", "pointer"].includes(desc.kind) ? "null" : "0"}`;
+  const values = [...(method ? ["this.ptr"] : []), ...args.map((arg, index) => convert(arg, names[index]!))];
+  const synced = [...(method ? ["this"] : []), ...args.flatMap((arg, index) => (arg.desc.kind === "object" ? [names[index]!] : []))].map((name) => `sync(${name});`);
+  const returned = result.kind === "void" ? "" : result.kind === "bool" ? "return r !== 0;" : ["number", "enum", "gtype"].includes(result.kind) ? "return r;" : "return convert(r);";
+  const source = `return function (${names}) { if (loop.sleeping) wake(); const r = call(${values}); ${synced.join(" ")} ${returned} };`;
+  return new Function("call", "loop", "wake", "sync", "convert", source)(call, loop, wake, syncInstance, (raw: Native) => fromNative(result, raw, transfer)) as Fn;
+}
+
 function compileFunction(info: Info, finish: () => Info | null, promised = false): Fn {
   const method = gi.gi_callable_info_is_method(info) !== 0;
   const throws = gi.gi_callable_info_can_throw_gerror(info) !== 0;
   const { args, result, transfer } = planCallable(info);
+  if (!throws && simple(result) && args.every((arg) => arg.direction === Direction.IN && !arg.hidden && arg.transfer === Transfer.NOTHING && simple(arg.desc))) {
+    return compileFast(info, method, args, result, transfer);
+  }
   const ffiArgs: FFITypeOrString[] = [...(method ? ["ptr" as const] : []), ...args.map((arg) => (arg.direction === Direction.IN ? arg.desc.ffi : "ptr")), ...(throws ? ["ptr" as const] : [])];
   const call = CFunction({ ptr: functionAddress(info), args: ffiArgs, returns: result.ffi });
   const visible = args.flatMap((arg, index) => (arg.hidden || arg.direction === Direction.OUT ? [] : [index]));
   const outputs = args.flatMap((arg, index) => (arg.hidden || arg.direction === Direction.IN ? [] : [index]));
   const objects = visible.flatMap((index, position) => (args[index]!.desc.kind === "object" ? [position] : []));
-  const asyncPosition = visible.findIndex((index) => args[index]!.desc.kind === "callback" && args[index]!.scope === Scope.ASYNC);
+  const asyncPosition = visible.findLastIndex((index, position) => {
+    const { desc, scope } = args[index]!;
+    return (desc.kind === "callback" && scope === Scope.ASYNC) || (position === visible.length - 1 && desc.kind === "struct" && desc.gtype === closureType);
+  });
   const offset = method ? 1 : 0;
   let finisher: Fn | undefined;
 
@@ -484,10 +508,13 @@ function adopt(wrapper: Instance, owned: boolean, previous?: WrapperEntry) {
   const token = {};
   if (previous && objectFinalizer.unregister(previous.token)) {
     if (owned) gobject.g_object_unref(address);
-  } else {
-    if (!owned || gobject.g_object_is_floating(address)) gobject.g_object_ref_sink(address);
+  } else if (gobject.g_object_is_floating(address)) {
+    gobject.g_object_ref_sink(address);
     gobject.g_object_add_toggle_ref(address, toggleNotify.ptr, null);
     gobject.g_object_unref(address);
+  } else {
+    gobject.g_object_add_toggle_ref(address, toggleNotify.ptr, null);
+    if (owned) gobject.g_object_unref(address);
   }
   wrappers.set(address, { ref: new WeakRef(wrapper), token });
   objectFinalizer.register(wrapper, address, token);
@@ -496,16 +523,14 @@ function adopt(wrapper: Instance, owned: boolean, previous?: WrapperEntry) {
 
 const fundamentalFinalizer = new FinalizationRegistry<[Pointer, Pointer]>(([unref, address]) => CFunction({ ptr: unref, args: ["ptr"], returns: "void" })(address));
 
-function wrapInstance(address: Pointer | null, owned: boolean, info?: Info): Instance | null {
-  if (!address) return null;
-  if (info && infoKind(info) === infoTypes.object && gi.gi_object_info_get_fundamental(info)) {
-    const wrapper = Object.create(classFor(typeOf(address)).prototype as object) as Instance;
-    wrapper.ptr = address;
-    if (!owned) CFunction({ ptr: gi.gi_object_info_get_ref_function_pointer(info)!, args: ["ptr"], returns: "ptr" })(address);
-    fundamentalFinalizer.register(wrapper, [gi.gi_object_info_get_unref_function_pointer(info)!, address]);
-    return wrapper;
-  }
-  return wrapObject(address, owned);
+function wrapInstance(address: Pointer | null, owned: boolean, desc: ObjectDesc): Instance | null {
+  if (!address || !desc.fundamental) return wrapObject(address, owned);
+  const { info } = desc;
+  const wrapper = Object.create(classFor(typeOf(address)).prototype as object) as Instance;
+  wrapper.ptr = address;
+  if (!owned) CFunction({ ptr: gi.gi_object_info_get_ref_function_pointer(info)!, args: ["ptr"], returns: "ptr" })(address);
+  fundamentalFinalizer.register(wrapper, [gi.gi_object_info_get_unref_function_pointer(info)!, address]);
+  return wrapper;
 }
 
 export function wrapObject<T = Instance>(address: Pointer | null, owned: boolean): T | null {
@@ -548,6 +573,7 @@ const fundamentals = new Map<number, number>();
 const fundamentalOf = (gtype: number) => fundamentals.get(gtype) ?? fundamentals.set(gtype, gobject.g_type_fundamental(gtype)).get(gtype)!;
 const strvType = gobject.g_strv_get_type();
 const initiallyUnowned = gobject.g_initially_unowned_get_type();
+const closureType = gobject.g_closure_get_type();
 const gtypeType = gobject.g_gtype_get_type();
 const stringArray: ArrayDesc = { kind: "array", ffi: "ptr", item: { kind: "string", ffi: "ptr" }, length: -1, fixed: -1, zero: true };
 
@@ -679,23 +705,35 @@ export function setProperty(instance: Instance, name: string, data: unknown) {
   if (instance instanceof ObjectBase && data instanceof ObjectBase) syncStrength(data);
 }
 
+const constructSpecs = new Map<string, { name: Buffer; gtype: number }>();
+
+function constructSpec(gtype: number, property: string) {
+  const key = `${gtype}:${property}`;
+  const cached = constructSpecs.get(key);
+  if (cached) return cached;
+  const name = text(kebab(property));
+  const spec = gobject.g_object_class_find_property(gobject.g_type_class_ref(gtype)!, name);
+  if (!spec) throw new Error(`${gobject.g_type_name(gtype)} has no property ${kebab(property)}`);
+  const created = { name, gtype: Number(read.u64(spec, 24)) };
+  constructSpecs.set(key, created);
+  return created;
+}
+
 function construct(gtype: number, properties: Record<string, unknown> = {}) {
   if (loop.sleeping) wake();
   const entries = Object.entries(properties).filter(([, value]) => value !== undefined);
-  const klass = gobject.g_type_class_ref(gtype)!;
   const names = new BigUint64Array(entries.length || 1);
   const values = new Uint8Array(GVALUE_SIZE * (entries.length || 1));
-  const encoded = entries.map(([name, value], index) => {
-    const property = text(kebab(name));
-    const spec = gobject.g_object_class_find_property(klass, property);
-    if (!spec) throw new Error(`${gobject.g_type_name(gtype)} has no property ${kebab(name)}`);
-    names[index] = BigInt(ptr(property));
-    setValue(ptr(values, index * GVALUE_SIZE), Number(read.u64(spec, 24)), value);
-    return property;
+  entries.forEach(([property, value], index) => {
+    const spec = constructSpec(gtype, property);
+    names[index] = BigInt(ptr(spec.name));
+    setValue(ptr(values, index * GVALUE_SIZE), spec.gtype, value);
   });
-  const address = gobject.g_object_new_with_properties(gtype, encoded.length, names, values)!;
-  encoded.forEach((_, index) => gobject.g_value_unset(ptr(values, index * GVALUE_SIZE)));
-  for (const [, value] of entries) if (value instanceof ObjectBase) syncStrength(value);
+  const address = gobject.g_object_new_with_properties(gtype, entries.length, names, values)!;
+  entries.forEach(([, value], index) => {
+    gobject.g_value_unset(ptr(values, index * GVALUE_SIZE));
+    if (value instanceof ObjectBase) syncStrength(value);
+  });
   return address;
 }
 
@@ -824,14 +862,20 @@ function defineLazy(target: object, name: string, compute: () => unknown, inheri
 
 function defineProperties(prototype: object, info: Info, count: (info: Info) => number, get: (info: Info, index: number) => Info | null) {
   for (let index = 0; index < count(info); index++) {
-    const property = nameOf(get(info, index)!);
+    const propertyInfo = get(info, index)!;
+    const property = nameOf(propertyInfo);
+    const getterInfo = gi.gi_property_info_get_getter(propertyInfo);
+    const setterInfo = gi.gi_property_info_get_setter(propertyInfo);
+    let getter: Fn | undefined;
+    let setter: Fn | undefined;
     const accessor = {
       configurable: true,
       get(this: Instance) {
-        return getProperty(this, property);
+        return getterInfo ? (getter ??= compileFunction(getterInfo, () => null)).call(this) : getProperty(this, property);
       },
       set(this: Instance, value: unknown) {
-        setProperty(this, property, value);
+        if (setterInfo) (setter ??= compileFunction(setterInfo, () => null)).call(this, value);
+        else setProperty(this, property, value);
       },
     };
     for (const name of new Set([camel(property), property.replace(/-/g, "_")])) if (!(name in prototype)) Object.defineProperty(prototype, name, accessor);

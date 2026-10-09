@@ -99,6 +99,8 @@ export const gi = library("libgirepository-2.0.so.0", {
   gi_type_info_get_array_fixed_size: outIndex,
   gi_type_info_is_zero_terminated: flag,
   gi_property_info_get_type_info: pointer,
+  gi_property_info_get_getter: pointer,
+  gi_property_info_get_setter: pointer,
 });
 
 export const gobject = library("libgobject-2.0.so.0", {
@@ -180,6 +182,7 @@ export const gobject = library("libgobject-2.0.so.0", {
   g_boxed_copy: { args: ["u64", "ptr"], returns: "ptr" },
   g_boxed_free: { args: ["u64", "ptr"], returns: "void" },
   g_strv_get_type: { args: [], returns: FFIType.u64_fast },
+  g_closure_get_type: { args: [], returns: FFIType.u64_fast },
   g_initially_unowned_get_type: { args: [], returns: FFIType.u64_fast },
   g_gtype_get_type: { args: [], returns: FFIType.u64_fast },
   g_param_spec_get_name: name,
