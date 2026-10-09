@@ -48,6 +48,14 @@ describe("objects", () => {
     expect(changes).toEqual([[0, 0, 1]]);
   });
 
+  test("objects returned from native code can connect signals", () => {
+    const action = Gio.SimpleAction.new("returned", null);
+    let activations = 0;
+    action.connect("activate", () => activations++);
+    action.activate(null);
+    expect(activations).toBe(1);
+  });
+
   test("private GTypes expose their interfaces", () => {
     const file = Gio.File.new_for_path("/etc/hostname");
     expect(file.get_basename()).toBe("hostname");

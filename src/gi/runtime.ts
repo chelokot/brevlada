@@ -786,6 +786,14 @@ function closureFor(handler: Fn) {
   return newClosure(id, closureMarshal, closureInvalidate);
 }
 
+function connect(instance: Instance, signal: string, handler: (...args: never[]) => unknown, after: boolean) {
+  const id = ++handlerIds;
+  const closure = newClosure(id, marshal, invalidate);
+  (instance[HANDLERS] ??= new Map()).set(id, handler as Fn);
+  handlerOwners.set(id, instance.ptr);
+  return gobject.g_signal_connect_closure(instance.ptr, text(signal), closure, after ? 1 : 0);
+}
+
 export class ObjectBase extends Instance {
   static $gtype: number = GType.OBJECT;
 
@@ -796,19 +804,11 @@ export class ObjectBase extends Instance {
   }
 
   connect(signal: string, handler: (...args: never[]) => unknown) {
-    return this.#connect(signal, handler, false);
+    return connect(this, signal, handler, false);
   }
 
   connect_after(signal: string, handler: (...args: never[]) => unknown) {
-    return this.#connect(signal, handler, true);
-  }
-
-  #connect(signal: string, handler: (...args: never[]) => unknown, after: boolean) {
-    const id = ++handlerIds;
-    const closure = newClosure(id, marshal, invalidate);
-    (this[HANDLERS] ??= new Map()).set(id, handler as Fn);
-    handlerOwners.set(id, this.ptr);
-    return gobject.g_signal_connect_closure(this.ptr, text(signal), closure, after ? 1 : 0);
+    return connect(this, signal, handler, true);
   }
 
   disconnect(id: number) {
