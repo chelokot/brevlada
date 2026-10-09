@@ -1,0 +1,4 @@
+preload = ["./src/gi/plugin.ts"]
+
+[test]
+preload = ["./src/gi/plugin.ts"]

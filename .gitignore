@@ -6,3 +6,5 @@ resources.gresource
 /.cargo/config.toml
 /.flatpak/
 /.flatpak-builder/
+/node_modules/
+/.probe/
