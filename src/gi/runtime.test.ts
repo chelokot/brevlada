@@ -48,6 +48,12 @@ describe("objects", () => {
     expect(changes).toEqual([[0, 0, 1]]);
   });
 
+  test("plain values convert to GValues", () => {
+    const action = new Gio.SimpleAction({ name: "value" });
+    action.set_property("enabled", false);
+    expect(action.enabled).toBe(false);
+  });
+
   test("objects returned from native code can connect signals", () => {
     const action = Gio.SimpleAction.new("returned", null);
     let activations = 0;

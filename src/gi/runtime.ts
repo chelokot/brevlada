@@ -16,6 +16,7 @@ const IS_METHOD = 1;
 const GVALUE_SIZE = 24;
 const numberTypes: Record<number, FFITypeOrString> = { 2: "i8", 3: "u8", 4: "i16", 5: "u16", 6: "i32", 7: "u32", 8: FFIType.i64_fast, 9: FFIType.u64_fast, 10: "f32", 11: "f64" };
 const slotSizes: Record<string, number> = { i8: 1, u8: 1, i16: 2, u16: 2, i32: 4, u32: 4, f32: 4 };
+const valueType = gobject.g_value_get_type();
 
 const repository = gi.gi_repository_new()!;
 const infoTypes = {
@@ -80,6 +81,7 @@ type Desc =
   | { kind: "number" | "enum"; ffi: FFITypeOrString }
   | { kind: "object"; ffi: "ptr"; info: Info; fundamental: boolean }
   | { kind: "struct"; ffi: "ptr"; info: Info; gtype: number; size: number; byValue: boolean }
+  | { kind: "gvalue"; ffi: "ptr"; inline: boolean }
   | { kind: "callback"; ffi: "ptr"; info: Info }
   | { kind: "array"; ffi: "ptr"; item: Desc; length: number; fixed: number; zero: boolean }
   | { kind: "list"; ffi: "ptr"; item: Desc; single: boolean };
@@ -128,6 +130,7 @@ function describe(type: Info): Desc {
   if (gtype === GType.VARIANT) return { kind: "variant", ffi: "ptr" };
   if (kind === infoTypes.object || kind === infoTypes.interface) return { kind: "object", ffi: "ptr", info, fundamental: kind === infoTypes.object && gi.gi_object_info_get_fundamental(info) !== 0 };
   const size = kind === infoTypes.union ? gi.gi_union_info_get_size(info) : gi.gi_struct_info_get_size(info);
+  if (gtype === valueType) return { kind: "gvalue", ffi: "ptr", inline: !gi.gi_type_info_is_pointer(type) };
   return { kind: "struct", ffi: "ptr", info, gtype: gtype === GType.NONE ? 0 : gtype, size, byValue: !gi.gi_type_info_is_pointer(type) };
 }
 
@@ -199,6 +202,12 @@ function toNative(desc: Desc, value: unknown, transfer: number, keep: unknown[])
     }
     case "array":
       return arrayToNative(desc, value, keep);
+    case "gvalue": {
+      if (value instanceof Instance) return value.ptr;
+      const buffer = new Uint8Array(GVALUE_SIZE);
+      storeValue(buffer, 0, value, keep);
+      return buffer;
+    }
   }
   if (typeof value === "function") return closureFor(value as Fn);
   const address = (value as Instance | null | undefined)?.ptr ?? null;
@@ -218,12 +227,32 @@ function arrayToNative(desc: ArrayDesc, value: unknown, keep: unknown[]): Native
     return owned.byteLength ? owned : null;
   }
   const items = value as unknown[];
+  if (desc.item.kind === "gvalue" && desc.item.inline) {
+    const values = new Uint8Array(GVALUE_SIZE * (items.length || 1));
+    items.forEach((item, index) => storeValue(values, index * GVALUE_SIZE, item, keep));
+    return values;
+  }
   const size = slotSizes[String(desc.item.ffi)] ?? 8;
   const buffer = new Uint8Array((items.length + (desc.zero ? 1 : 0)) * size || 8);
   const view = new DataView(buffer.buffer);
   items.forEach((item, index) => writeSlot(desc.item, view, index * size, toNative(desc.item, item, Transfer.NOTHING, keep)));
   keep.push(buffer);
   return buffer;
+}
+
+function jsValueType(value: unknown) {
+  if (typeof value === "string") return GType.STRING;
+  if (typeof value === "boolean") return GType.BOOLEAN;
+  if (typeof value === "number") return Number.isInteger(value) ? GType.INT : GType.DOUBLE;
+  if (Array.isArray(value)) return strvType;
+  if (value instanceof ObjectBase) return typeOf(value.ptr);
+  return GType.VARIANT;
+}
+
+function storeValue(buffer: Uint8Array, offset: number, value: unknown, keep: unknown[]) {
+  const address = ptr(buffer, offset);
+  setValue(address, jsValueType(value), value);
+  keep.push(buffer, () => gobject.g_value_unset(address));
 }
 
 const arrayLength = (value: unknown) => (typeof value === "string" ? Buffer.byteLength(value) : ((value as ArrayLike<unknown> | null | undefined)?.length ?? 0));
@@ -259,6 +288,8 @@ function fromNative(desc: Desc, raw: Native, transfer: number, length = -1): unk
     }
     case "array":
       return arrayFromNative(desc, raw as Pointer | null, transfer, length);
+    case "gvalue":
+      return raw ? getValue(raw as Pointer) : null;
     default:
       return raw;
   }
@@ -418,6 +449,7 @@ function compileFunction(info: Info, finish: () => Info | null, promised = false
     });
     if (throws) native[ffiArgs.length - 1] = slotAddress + args.length * 8;
     const raw = call(...native) as Native;
+    for (const item of keep) if (typeof item === "function") item();
     for (const id of scoped) callbacks.delete(id);
     if (method && this instanceof ObjectBase) syncStrength(this);
     for (const position of objects) if (values[position] instanceof ObjectBase) syncStrength(values[position] as Instance);

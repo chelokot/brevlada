@@ -183,6 +183,7 @@ export const gobject = library("libgobject-2.0.so.0", {
   g_boxed_free: { args: ["u64", "ptr"], returns: "void" },
   g_strv_get_type: { args: [], returns: FFIType.u64_fast },
   g_closure_get_type: { args: [], returns: FFIType.u64_fast },
+  g_value_get_type: { args: [], returns: FFIType.u64_fast },
   g_initially_unowned_get_type: { args: [], returns: FFIType.u64_fast },
   g_gtype_get_type: { args: [], returns: FFIType.u64_fast },
   g_param_spec_get_name: name,
