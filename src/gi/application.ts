@@ -34,6 +34,7 @@ export function run(app: Gtk.Application, argv: string[]) {
   };
   Object.assign(app, {
     hold() {
+      clearTimeout(idle);
       holds++;
       hold();
     },
