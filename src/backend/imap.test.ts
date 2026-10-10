@@ -42,7 +42,7 @@ test("logs in over implicit TLS and STARTTLS and surfaces server and certificate
     expect(["IMAP4rev1", "UIDPLUS", "MOVE"].filter((name) => capabilities.has(name))).toEqual(["IMAP4rev1", "UIDPLUS", "MOVE"]);
     await session.logout();
   }
-  await expect(server.login("wrong")).rejects.toThrow("No Response: Authentication failed.");
+  await expect(server.login("wrong")).rejects.toThrow("No Response: [AUTHENTICATIONFAILED] Authentication failed.");
   const stream = await Stream.connect("127.0.0.1", server.imaps);
   await expect(stream.upgrade("example.com")).rejects.toThrow("Hostname/IP does not match");
 });

@@ -184,9 +184,12 @@ export class Session {
   }
 }
 
+const KNOWN_CODE = /^\[(?:ALERT|BADCHARSET(?: \([^)]*\))?|CAPABILITY [^\]]*|PARSE|PERMANENTFLAGS \([^)]*\)|UIDVALIDITY \d+|UIDNEXT \d+|UNSEEN \d+|READ-ONLY|READ-WRITE|TRYCREATE|HIGHESTMODSEQ \d+)\]/i;
+
 function completion(line: string) {
-  const [, status = "", information = ""] = /^\S+ (\S+)(?: \[[^\]]*\])? ?(.*)$/.exec(line) ?? [];
-  const explanation = information || "no explanation given";
+  const [, status = "", text = ""] = /^\S+ (\S+) ?(.*)$/.exec(line) ?? [];
+  const code = KNOWN_CODE.exec(text);
+  const explanation = (code ? text.slice(code[0].length + 1) : text) || "no explanation given";
   if (sameAscii(status, "NO")) throw new Error(`No Response: ${explanation}`);
   if (sameAscii(status, "BAD")) throw new Error(`Bad Response: ${explanation}`);
   if (!sameAscii(status, "OK")) throw new Error("Unable to parse status response");

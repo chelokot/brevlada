@@ -49,6 +49,29 @@ export function save(event: Event, error: Gtk.Label) {
   return button;
 }
 
+const serialized = ({ uid, recurrenceId, sequence, stamp, method, organizerEmail, attendees, name, start, end, timezone, location, organizer, description, url, status, rsvp, invitation, calendar }: Event) =>
+  JSON.stringify({
+    uid,
+    recurrence_id: recurrenceId,
+    sequence,
+    stamp,
+    method,
+    organizer_email: organizerEmail,
+    attendees: attendees.map(({ email, name, status }) => ({ email, name, status })),
+    name,
+    start,
+    end,
+    timezone,
+    location,
+    organizer,
+    description,
+    url,
+    status,
+    rsvp: rsvp.map(({ label, url }) => ({ label, url })),
+    invitation,
+    calendar,
+  });
+
 function openCalendar(button: Gtk.Button, event: Event, error: Gtk.Label) {
   const calendar = toIcal(event);
   if (calendar === null) {
@@ -57,7 +80,7 @@ function openCalendar(button: Gtk.Button, event: Event, error: Gtk.Label) {
     return;
   }
   const directory = `${GLib.get_user_cache_dir()}/brevlada/calendar`;
-  const path = `${directory}/${new Bun.CryptoHasher("sha256").update(JSON.stringify(event)).digest("hex")}.ics`;
+  const path = `${directory}/${new Bun.CryptoHasher("sha256").update(serialized(event)).digest("hex")}.ics`;
   try {
     mkdirSync(directory, { recursive: true });
     writeFileSync(path, calendar);

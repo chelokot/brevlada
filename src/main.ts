@@ -32,6 +32,7 @@ function installIcons(display: Gdk.Display) {
   Gtk.IconTheme.get_for_display(display).add_search_path(directory);
 }
 
+GLib.set_prgname("brevlada");
 const app = new Adw.Application({ applicationId: "io.github.ExposedCat.Brevlada" });
 let engine: Engine | null = null;
 let background: Background | null = null;
