@@ -28,6 +28,7 @@ export function view(message: Message, media: boolean, hideQuotes: boolean): [Gt
   overlay.set_measure_overlay(stack, true);
   const stacks = new WeakRef(stack);
   const contents = new WeakRef(content);
+  const views = new WeakRef(view);
   connect(view, content, manager, () => {
     const stack = stacks.deref();
     const content = contents.deref();
@@ -39,11 +40,10 @@ export function view(message: Message, media: boolean, hideQuotes: boolean): [Gt
     if (event === WebKit.LoadEvent.FINISHED) observe(view);
   });
   let document: string | null = null;
-  const fail = (view: WebKit.WebView, message: string) => {
+  const fail = (message: string) => {
     const stack = stacks.deref();
     if (!stack) return;
     contents.deref()?.set_opacity(0);
-    const views = new WeakRef(view);
     const row = error(message, () => {
       const view = views.deref();
       const stack = stacks.deref();
@@ -57,11 +57,11 @@ export function view(message: Message, media: boolean, hideQuotes: boolean): [Gt
     stack.set_visible_child_name("error");
     stack.set_visible(true);
   };
-  view.connect("load-failed", (view, _event: WebKit.LoadEvent, _uri: string, failure: GLib.Error) => {
-    fail(view, failure.message);
+  view.connect("load-failed", (_view, _event: WebKit.LoadEvent, _uri: string, failure: GLib.Error) => {
+    fail(failure.message);
     return true;
   });
-  view.connect("web-process-terminated", (view) => fail(view, "The message renderer stopped"));
+  view.connect("web-process-terminated", () => fail("The message renderer stopped"));
   view.connect("map", observe);
   view.connect("unrealize", (view) => view.stop_loading());
   view.connect("decide-policy", (_view, decision: WebKit.PolicyDecision, kind: WebKit.PolicyDecisionType) => {
@@ -75,9 +75,8 @@ export function view(message: Message, media: boolean, hideQuotes: boolean): [Gt
     return true;
   });
   queueMicrotask(() => {
-    const html = htmlDocument(message, hideQuotes, media);
-    view.load_html(html, "about:blank");
-    document = html;
+    document = htmlDocument(message, hideQuotes, media);
+    views.deref()?.load_html(document, "about:blank");
   });
   return [new Gtk.Frame({ vexpand: false, child: overlay, hexpand: true, cssClasses: ["html-viewer-frame"] }), view];
 }

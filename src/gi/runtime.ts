@@ -1,4 +1,5 @@
 import { CFunction, CString, FFIType, JSCallback, ptr, read, toArrayBuffer, type FFITypeOrString, type Pointer } from "bun:ffi";
+import { fullGC } from "bun:jsc";
 import { loop, wake } from "./loop";
 import { gi, glib, gobject } from "./native";
 
@@ -370,6 +371,8 @@ function compileFast(info: Info, method: boolean, args: ArgPlan[], result: Desc,
   return new Function("call", "loop", "wake", "sync", "convert", source)(call, loop, wake, syncInstance, (raw: Native) => fromNative(result, raw, transfer)) as Fn;
 }
 
+const noFinish = () => null;
+
 function compileFunction(info: Info, finish: () => Info | null, promised = false): Fn {
   const method = gi.gi_callable_info_is_method(info) !== 0;
   const throws = gi.gi_callable_info_can_throw_gerror(info) !== 0;
@@ -397,7 +400,7 @@ function compileFunction(info: Info, finish: () => Info | null, promised = false
     if (asyncPosition >= 0 && values[asyncPosition] === undefined) {
       const finishInfo = finish();
       if (finishInfo) {
-        finisher ??= compileFunction(finishInfo, () => null, true);
+        finisher ??= compileFunction(finishInfo, noFinish, true);
         return new Promise((resolve, reject) => {
           values[asyncPosition] = (source: Instance | null, result: Instance) => {
             try {
@@ -520,9 +523,19 @@ const wrappers = new Map<number, WrapperEntry>();
 const strong = new Set<Instance>();
 const classes = new Map<number, Constructor>();
 
+let collecting = false;
+
+function collect() {
+  collecting = false;
+  fullGC();
+}
+
 function syncStrength(wrapper: Instance) {
   if (read.u32(wrapper.ptr, 8) > 1) strong.add(wrapper);
-  else strong.delete(wrapper);
+  else if (strong.delete(wrapper) && !collecting) {
+    collecting = true;
+    setTimeout(collect, 100).unref();
+  }
 }
 
 const toggleNotify = new JSCallback(
@@ -906,10 +919,10 @@ function defineProperties(prototype: object, info: Info, count: (info: Info) => 
     const accessor = {
       configurable: true,
       get(this: Instance) {
-        return getterInfo ? (getter ??= compileFunction(getterInfo, () => null)).call(this) : getProperty(this, property);
+        return getterInfo ? (getter ??= compileFunction(getterInfo, noFinish)).call(this) : getProperty(this, property);
       },
       set(this: Instance, value: unknown) {
-        if (setterInfo) (setter ??= compileFunction(setterInfo, () => null)).call(this, value);
+        if (setterInfo) (setter ??= compileFunction(setterInfo, noFinish)).call(this, value);
         else setProperty(this, property, value);
       },
     };

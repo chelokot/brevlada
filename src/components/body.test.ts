@@ -4,7 +4,7 @@ import { message } from "../models";
 import { BODY_HEIGHT } from "../theme";
 import { view } from "./body";
 import { column, scroll } from "./index";
-import { settle, useDisplay } from "./testing";
+import { settle, until, useDisplay } from "./testing";
 
 useDisplay();
 
@@ -59,3 +59,19 @@ test("full message is measured after mapping and width changes", async () => {
   window.close();
   await settle(250);
 }, 20_000);
+
+test("removed message bodies release their web view", async () => {
+  const finalized = new FinalizationRegistry<null>(() => (released = true));
+  let released = false;
+  const window = new Gtk.Window({ defaultWidth: 700, defaultHeight: 400 });
+  (() => {
+    const [body, webview] = view(message({ bodyHtml: "<p>Hello</p>", bodyLoaded: true }), false, false);
+    finalized.register(webview, null);
+    window.set_child(body);
+  })();
+  window.present();
+  await settle(1000);
+  window.set_child(null);
+  await until(() => released, 5000);
+  window.close();
+}, 10_000);

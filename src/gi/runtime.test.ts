@@ -112,6 +112,21 @@ describe("objects", () => {
     }
     expect(collected).toBeGreaterThanOrEqual(99);
   });
+
+  test("wrappers released by native owners are collected without an explicit collection", async () => {
+    const finalized = new FinalizationRegistry<null>(() => collected++);
+    let collected = 0;
+    const store = new Gio.ListStore({ itemType: GObject.Object.$gtype });
+    (() => {
+      const item = new GObject.Object();
+      finalized.register(item, null);
+      store.append(item);
+    })();
+    Bun.gc(true);
+    store.remove_all();
+    for (let attempt = 0; attempt < 100 && collected === 0; attempt++) await Bun.sleep(10);
+    expect(collected).toBe(1);
+  });
 });
 
 describe("callbacks and the main loop", () => {
@@ -119,6 +134,21 @@ describe("callbacks and the main loop", () => {
     const [contents, etag] = await Gio.File.new_for_path("/etc/hostname").load_contents_async(null);
     expect(etag).toContain(":");
     expect(contents.length).toBeGreaterThan(0);
+  });
+
+  test("objects used for async calls are released afterwards", async () => {
+    const finalized = new FinalizationRegistry<null>(() => collected++);
+    let collected = 0;
+    await (async () => {
+      const file = Gio.File.new_for_path("/etc/hostname");
+      finalized.register(file, null);
+      await file.load_bytes_async(null);
+    })();
+    for (let attempt = 0; attempt < 20 && collected === 0; attempt++) {
+      Bun.gc(true);
+      await Bun.sleep(10);
+    }
+    expect(collected).toBe(1);
   });
 
   test("GLib timeouts and Bun timers interleave", async () => {
