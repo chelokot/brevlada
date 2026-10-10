@@ -6,12 +6,12 @@ const CR = 13;
 const SPACE = 32;
 const TAB = 9;
 const COLON = 58;
-const EQUALS = 61;
 
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const encoder = new TextEncoder();
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const utf16 = new TextDecoder("utf-16be", { ignoreBOM: true });
+const windows1252 = new TextDecoder("windows-1252");
 
 type Decoder = { decode(bytes: Uint8Array): string };
 const decoders = new Map<string, Decoder | null>();
@@ -95,9 +95,9 @@ export class Part {
     const encoding = this.header("Content-Transfer-Encoding");
     switch (encoding && encoding.toLowerCase()) {
       case "base64":
-        return base64(latin1(this.content));
+        return base64(windows1252.decode(this.content));
       case "quoted-printable":
-        return quotedPrintable(latin1(this.content));
+        return quotedPrintable(windows1252.decode(this.content));
       default:
         return this.content;
     }
@@ -375,55 +375,45 @@ function exactBase64(text: string): Uint8Array {
   return Uint8Array.from(output);
 }
 
+const hex = new Int8Array(256).fill(-1);
+for (const [index, character] of [..."0123456789ABCDEF"].entries()) hex[character.charCodeAt(0)] = hex[character.toLowerCase().charCodeAt(0)] = index;
+const characters = Array.from({ length: 256 }, (_, code) => String.fromCharCode(code));
+
 function quotedPrintable(input: string): Uint8Array {
-  const text = input.replace(/[^\t\n\r\x20-\x7e]/g, "");
-  let breaks = 0;
-  for (let index = text.indexOf("\n"); index >= 0; index = text.indexOf("\n", index + 1)) breaks++;
-  const output = new Uint8Array(text.length + breaks);
-  const hex = (code: number) => (code >= 48 && code <= 57 ? code - 48 : code >= 65 && code <= 70 ? code - 55 : code >= 97 && code <= 102 ? code - 87 : -1);
-  let length = 0;
-  let lineBreak: boolean | null = null;
+  const text = /[^\t\n\r\x20-\x7e]/.test(input) ? input.replace(/[^\t\n\r\x20-\x7e]/g, "") : input;
+  let output = "";
+  let lineBreak = false;
+  let equals = text.indexOf("=");
   for (let start = 0; start < text.length; ) {
     const newline = text.indexOf("\n", start);
     let end = newline < 0 ? text.length : newline;
-    while (end > start && [SPACE, TAB, CR].includes(text.charCodeAt(end - 1))) end--;
-    if (lineBreak) {
-      output[length++] = CR;
-      output[length++] = LF;
-      lineBreak = false;
-    }
+    for (let code = text.charCodeAt(end - 1); end > start && (code === SPACE || code === TAB || code === CR); code = text.charCodeAt(end - 1)) end--;
+    if (lineBreak) output += "\r\n";
+    lineBreak = true;
     for (let index = start; ; ) {
-      if (index >= end) {
-        lineBreak = true;
+      if (equals >= 0 && equals < index) equals = text.indexOf("=", index);
+      if (equals < 0 || equals >= end) {
+        output += text.slice(index, end);
         break;
       }
-      const code = text.charCodeAt(index++);
-      if (code !== EQUALS) {
-        output[length++] = code;
-        continue;
-      }
-      if (index >= end) break;
-      const upper = text.charCodeAt(index++);
-      if (index >= end) {
-        output.set([EQUALS, upper], length);
-        length += 2;
-        lineBreak = true;
+      output += text.slice(index, equals);
+      if (equals + 1 === end) {
+        lineBreak = false;
         break;
       }
-      const lower = text.charCodeAt(index++);
-      if (hex(upper) >= 0 && hex(lower) >= 0) output[length++] = (hex(upper) << 4) | hex(lower);
-      else {
-        output.set([EQUALS, upper, lower], length);
-        length += 3;
+      if (equals + 2 === end) {
+        output += text.slice(equals, end);
+        break;
       }
+      const high = hex[text.charCodeAt(equals + 1)] ?? -1;
+      const low = hex[text.charCodeAt(equals + 2)] ?? -1;
+      output += high >= 0 && low >= 0 ? (characters[(high << 4) | low] ?? "") : text.slice(equals, equals + 3);
+      index = equals + 3;
     }
     start = newline < 0 ? text.length : newline + 1;
   }
-  if (text.endsWith("\n") && lineBreak) {
-    output[length++] = CR;
-    output[length++] = LF;
-  }
-  return output.subarray(0, length);
+  if (text.endsWith("\n") && lineBreak) output += "\r\n";
+  return Buffer.from(output, "latin1");
 }
 
 function parseContentType(header: string): ContentType {

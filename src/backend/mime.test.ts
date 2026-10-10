@@ -104,3 +104,8 @@ test("parses dates with mailparse's arithmetic and errors", () => {
     else expect(() => dateparse(date)).toThrow(expected);
   }
 });
+
+test("keeps every line break of quoted-printable bodies made of bare line feeds", () => {
+  const part = parseMail(utf8(`Content-Transfer-Encoding: quoted-printable\r\n\r\n${"\n".repeat(9)}a=\n\nb\n`));
+  expect(new TextDecoder().decode(part.bodyRaw())).toBe(`${"\r\n".repeat(9)}a\r\nb\r\n`);
+});
