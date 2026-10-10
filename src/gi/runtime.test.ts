@@ -127,6 +127,25 @@ describe("objects", () => {
     for (let attempt = 0; attempt < 100 && collected === 0; attempt++) await Bun.sleep(10);
     expect(collected).toBe(1);
   });
+
+  test("wrappers released while still referenced are collected once the reference goes away", async () => {
+    const finalized = new FinalizationRegistry<null>(() => collected++);
+    let collected = 0;
+    const store = new Gio.ListStore({ itemType: GObject.Object.$gtype });
+    const held: GObject.Object[] = [];
+    (() => {
+      const item = new GObject.Object();
+      finalized.register(item, null);
+      store.append(item);
+      held.push(item);
+    })();
+    Bun.gc(true);
+    store.remove_all();
+    await Bun.sleep(300);
+    held.length = 0;
+    for (let attempt = 0; attempt < 300 && collected === 0; attempt++) await Bun.sleep(10);
+    expect(collected).toBe(1);
+  });
 });
 
 describe("callbacks and the main loop", () => {
@@ -144,7 +163,7 @@ describe("callbacks and the main loop", () => {
       finalized.register(file, null);
       await file.load_bytes_async(null);
     })();
-    for (let attempt = 0; attempt < 20 && collected === 0; attempt++) {
+    for (let attempt = 0; attempt < 100 && collected === 0; attempt++) {
       Bun.gc(true);
       await Bun.sleep(10);
     }

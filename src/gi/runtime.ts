@@ -523,18 +523,33 @@ const wrappers = new Map<number, WrapperEntry>();
 const strong = new Set<Instance>();
 const classes = new Map<number, Constructor>();
 
-let collecting = false;
+const COLLECTION_DELAY = 100;
+const RELEASE_WINDOW = 10_000;
+const released = new Map<number, number>();
+let collection: ReturnType<typeof setTimeout> | null = null;
+let delay = COLLECTION_DELAY;
+
+function collectIn(milliseconds: number) {
+  if (collection) clearTimeout(collection);
+  delay = milliseconds;
+  collection = setTimeout(collect, milliseconds).unref();
+}
 
 function collect() {
-  collecting = false;
+  collection = null;
   fullGC();
+  const now = performance.now();
+  for (const [address, until] of released) if (now >= until) released.delete(address);
+  if (released.size > 0) collectIn(delay * 2);
 }
 
 function syncStrength(wrapper: Instance) {
-  if (read.u32(wrapper.ptr, 8) > 1) strong.add(wrapper);
-  else if (strong.delete(wrapper) && !collecting) {
-    collecting = true;
-    setTimeout(collect, 100).unref();
+  if (read.u32(wrapper.ptr, 8) > 1) {
+    strong.add(wrapper);
+    released.delete(wrapper.ptr);
+  } else if (strong.delete(wrapper)) {
+    released.set(wrapper.ptr, performance.now() + RELEASE_WINDOW);
+    if (!collection || delay > COLLECTION_DELAY) collectIn(COLLECTION_DELAY);
   }
 }
 
@@ -548,6 +563,7 @@ const toggleNotify = new JSCallback(
 
 const objectFinalizer = new FinalizationRegistry<number>((address) => {
   wrappers.delete(address);
+  released.delete(address);
   gobject.g_object_remove_toggle_ref(address as Pointer, toggleNotify.ptr, null);
 });
 
