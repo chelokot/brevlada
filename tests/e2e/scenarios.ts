@@ -3,7 +3,11 @@ import { parseArgs } from "node:util";
 import { alice, arrival } from "./corpus";
 import { accounts, defaults, launch, park, type Desktop, type Setup } from "./environment";
 
-type Step = Desktop & { shot: (name: string, quiet?: number) => Promise<void>; right: (left: number, top: number) => Promise<unknown> };
+type Step = Desktop & {
+  shot: (name: string, quiet?: number) => Promise<void>;
+  right: (left: number, top: number) => Promise<unknown>;
+  animate: (name: string, trigger: () => Promise<unknown>) => Promise<void>;
+};
 type Scenario = { name: string; setup: Partial<Setup>; run: (ui: Step) => Promise<void> };
 
 const title = "Brevlada Email Client";
@@ -23,6 +27,8 @@ const button = {
 } as const;
 const narrow = { expand: [127, 77], threadSort: [882, 77] } as const;
 const draftSaved = 3000;
+const animationFrames = 20;
+const asyncWork = 1000;
 const keyboardFocusHidden = 3500;
 
 async function conversation(ui: Step, row: number, threadRow: number) {
@@ -481,6 +487,25 @@ const scenarios: Scenario[] = [
     },
   },
   {
+    name: "animations",
+    setup: {},
+    async run(ui) {
+      await ui.click(...account.alice);
+      await ui.animate("animation-sender-open", () => ui.click(...sender(0)));
+      await ui.animate("animation-conversation-reveal", () => ui.click(...thread(0)));
+      await ui.animate("animation-card-expand", () => ui.click(943, 268));
+      await ui.animate("animation-sidebar-collapse", () => ui.click(...button.collapse));
+      await ui.animate("animation-sidebar-expand", () => ui.click(...narrow.expand));
+      await ui.animate("animation-search-open", () => ui.click(...button.search));
+      await ui.animate("animation-search-close", () => ui.click(...button.search));
+      await ui.animate("animation-sort-menu-open", () => ui.click(...button.sort));
+      await ui.animate("animation-sort-menu-close", () => ui.key("Escape"));
+      await ui.animate("animation-main-menu-open", () => ui.click(...button.menu));
+      await ui.animate("animation-settings-open", () => ui.click(...button.settings));
+      await ui.animate("animation-settings-close", () => ui.key("Escape"));
+    },
+  },
+  {
     name: "large-inbox",
     setup: { large: 2000 },
     async run(ui) {
@@ -526,6 +551,17 @@ for (const { name, setup, run } of selected) {
       async shot(shot, quiet = 1000) {
         await Bun.write(`${out}/${shot}.png`, await desktop.settle(quiet));
         shots[shot] = elapsed();
+      },
+      async animate(name, trigger) {
+        await desktop.settle();
+        desktop.clock.freeze();
+        await trigger();
+        await Bun.sleep(asyncWork);
+        for (let frame = 1; frame <= animationFrames; frame++) {
+          desktop.clock.step();
+          await Bun.write(`${out}/${name}-${String(frame).padStart(2, "0")}.png`, await desktop.settle(200));
+        }
+        desktop.clock.release();
       },
     };
     try {

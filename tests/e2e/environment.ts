@@ -1,6 +1,6 @@
 import { $, type Subprocess } from "bun";
-import { dlopen } from "bun:ffi";
-import { appendFileSync, existsSync, openSync } from "node:fs";
+import { dlopen, ptr } from "bun:ffi";
+import { appendFileSync, closeSync, existsSync, openSync, writeSync } from "node:fs";
 import { cp, mkdir, readdir, rm, stat, utimes } from "node:fs/promises";
 import { brands, domains, messages, pdf, people, photo, writeMaildir } from "./corpus";
 import type { GoaAccount, GoaConfig } from "./goa";
@@ -81,7 +81,15 @@ async function corpus(large: number) {
 const libc = dlopen("libc.so.6", {
   prctl: { args: ["i32", "u64", "u64", "u64", "u64"], returns: "i32" },
   waitpid: { args: ["i32", "ptr", "i32"], returns: "i32" },
+  clock_gettime: { args: ["i32", "ptr"], returns: "i32" },
 }).symbols;
+const frameInterval = 16_666_667n;
+
+function monotonic() {
+  const time = new BigInt64Array(2);
+  libc.clock_gettime(1, ptr(time));
+  return time[0]! * 1_000_000_000n + time[1]!;
+}
 libc.prctl(36, 1, 0, 0, 0);
 const tracked = new Set<number>();
 
@@ -102,6 +110,13 @@ async function reap() {
 }
 
 let trusted: Promise<void> | undefined;
+let clockShim: Promise<string> | undefined;
+
+async function compileClock() {
+  await mkdir(root, { recursive: true });
+  await $`gcc -shared -fPIC -O2 -o ${root}/clock.so ${import.meta.dir}/clock.c -ldl`;
+  return `${root}/clock.so`;
+}
 const corpora: Record<number, Promise<string>> = {};
 
 const dovecotConfig = (dir: string, mail: string) => `dovecot_config_version = 2.4.5
@@ -205,6 +220,7 @@ export async function launch(name: string, app: string[], setup: Setup) {
   const busy = (await Promise.all(ports.map(async (port) => (await reachable(port)) && port))).filter(Boolean);
   if (busy.length) throw new Error(`Ports ${busy.join(", ")} are in use: is another e2e environment running?`);
   await (trusted ??= trust());
+  const shim = await (clockShim ??= compileClock());
   const maildir = await (corpora[setup.large] ??= corpus(setup.large));
   const dir = `${root}/run/${name}`;
   const home = `${dir}/home`;
@@ -343,7 +359,16 @@ export async function launch(name: string, app: string[], setup: Setup) {
     await x("mousemove", ...park);
     const started = performance.now();
     const log = openSync(`${dir}/app.log`, "w");
-    const application = track(Bun.spawn(app, { cwd: `${home}/Documents`, env: environment, detached: true, stdout: log, stderr: log }));
+    await Bun.write(`${dir}/clock`, new Uint8Array(8));
+    const clockFile = openSync(`${dir}/clock`, "r+");
+    const frozen = new BigInt64Array(1);
+    const setClock = (value: bigint) => {
+      frozen[0] = value;
+      writeSync(clockFile, frozen, 0, 8, 0);
+    };
+    const clocked = { ...environment, LD_PRELOAD: `${shim} ${environment.LD_PRELOAD}`, BREVLADA_CLOCK: `${dir}/clock`, BREVLADA_CHILD_PRELOAD: environment.LD_PRELOAD };
+    const application = track(Bun.spawn(app, { cwd: `${home}/Documents`, env: clocked, detached: true, stdout: log, stderr: log }));
+    cleanup.push(() => closeSync(clockFile));
     cleanup.push(async () => {
       await $`xdotool key ctrl+q`.env(environment).nothrow().quiet();
       await Promise.race([application.exited, Bun.sleep(5000)]);
@@ -385,6 +410,11 @@ export async function launch(name: string, app: string[], setup: Setup) {
       lines: async (file: string) =>
         (await Bun.file(`${dir}/${file}`).exists()) ? (await Bun.file(`${dir}/${file}`).text()).replaceAll(dir, "$RUN").trim().split("\n") : [],
       smtp: async () => Promise.all((await readdir(`${dir}/smtp`)).sort().map((file) => Bun.file(`${dir}/smtp/${file}`).text())),
+      clock: {
+        freeze: () => setClock(monotonic()),
+        step: () => setClock(frozen[0]! + frameInterval),
+        release: () => setClock(0n),
+      },
       stop: teardown,
     };
   } catch (error) {
