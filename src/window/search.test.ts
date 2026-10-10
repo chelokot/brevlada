@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import Gtk from "gi://Gtk?version=4.0";
 import { type Location, locationKey } from "../backend/search";
-import { descendants, settle } from "../components/testing";
+import { descendants, settle, until } from "../components/testing";
 import { groups, update, visibleRow } from "../components/virtual-list";
 import { message, type Message } from "../models";
 import type { ActionTarget } from "../models/action-target";
@@ -11,7 +11,7 @@ import { publishSearchGroups } from "./rendering";
 import { senderAction } from "./sender-actions";
 import { filterSender, loadSenderPage } from "./sender-pane";
 import type { State } from "./state";
-import { inbox, present, searchBar, until, useWindows, widget } from "./testing";
+import { inbox, present, searchBar, useWindows, widget } from "./testing";
 
 useWindows();
 

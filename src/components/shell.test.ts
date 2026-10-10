@@ -57,6 +57,7 @@ test("empty state labels align", async () => {
 });
 
 test("window transitions keep headers and input in sync", async () => {
+  const existing = Gtk.Window.list_toplevels().length;
   const shown = shell("Window");
   const { window, refresh, sidebar } = shown;
   const pane = sidebar.get_ancestor(Gtk.Paned.$gtype);
@@ -73,7 +74,7 @@ test("window transitions keep headers and input in sync", async () => {
     expect(rect.get_y() + rect.get_height()).toBeLessThanOrEqual(window.get_height());
     const picked = window.pick(rect.get_x() + rect.get_width() / 2, rect.get_y() + rect.get_height() / 2, Gtk.PickFlags.DEFAULT);
     expect(picked === refresh || !!picked?.is_ancestor(refresh)).toBe(true);
-    expect(Gtk.Window.list_toplevels()).toHaveLength(1);
+    expect(Gtk.Window.list_toplevels()).toHaveLength(existing + 1);
   };
   window.present();
   await check(false, false, shown);

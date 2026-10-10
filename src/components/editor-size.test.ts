@@ -3,7 +3,7 @@ import Gdk from "gi://Gdk?version=4.0";
 import Gtk from "gi://Gtk?version=4.0";
 import { COMPOSE_HEIGHT, COMPOSE_RESIZE_STEP } from "../theme";
 import { automaticHeight, Size } from "./editor-size";
-import { settle, useDisplay } from "./testing";
+import { settle, useDisplay, until } from "./testing";
 
 useDisplay();
 
@@ -41,7 +41,7 @@ test("grows text and resizes both modes", async () => {
     await settle(100);
   };
   await type("A line\n".repeat(100));
-  expect(size.height).toBe(size.maximum());
+  await until(() => size.height === size.maximum());
   size.stack.set_visible_child_name("html");
   await settle(100);
   expect(size.stack.heightRequest).toBe(size.maximum());

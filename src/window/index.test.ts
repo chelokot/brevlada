@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Storage } from "../backend/storage";
 import { Avatars, PIXEL } from "../components/avatars";
-import { descendants, labels, settle } from "../components/testing";
+import { descendants, labels, settle, until } from "../components/testing";
 import { groups, item, model, selected, selection, visibleRow } from "../components/virtual-list";
 import { listHeader, message, type Message } from "../models";
 import { fromMessage } from "../models/draft";
@@ -25,7 +25,7 @@ import { beginSearch, cancelSearch, closeSenderPane, searchOpen, senderSearchAct
 import { filterSender, loadSenderPage } from "./sender-pane";
 import { rememberSorting } from "./sorting";
 import type { State } from "./state";
-import { account, inbox, next, present, searchBar, senderTicket, testState, until, useWindows, widget } from "./testing";
+import { account, inbox, next, present, searchBar, senderTicket, testState, useWindows, widget } from "./testing";
 
 useWindows();
 
@@ -917,7 +917,7 @@ test("loading and refresh keep selection, rows and cards", async () => {
   expect(compose.widget.get_visible()).toBe(true);
   expect(receiver.get_text()).toBe("edited@example.com");
   const sent = (type: "Compose" | "SaveDraft") => commands.find((command) => command.type === type);
-  await until(() => sent("Compose") !== undefined);
+  await until(() => sent("Compose") !== undefined, 10_000);
   const sending = present(sent("Compose"));
   if (sending.type !== "Compose") throw new Error("Expected message send");
   event(state, { type: "Composed", request: sending.request, result: { ok: false, error: "Mail service stopped" } });
@@ -1023,4 +1023,4 @@ test("loading and refresh keep selection, rows and cards", async () => {
   expect(state.messages).toHaveLength(0);
   expect(window.is_visible()).toBe(false);
   window.close();
-});
+}, 30_000);

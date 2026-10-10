@@ -1,28 +1,41 @@
-import { afterAll, beforeAll } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import Adw from "gi://Adw?version=1";
 import Gdk from "gi://Gdk?version=4.0";
 import Gtk from "gi://Gtk?version=4.0";
 import { startLoop, stopLoop } from "../gi/loop";
 import { CSS } from "../theme";
 
-export function useDisplay() {
+let display: Gdk.Display | null = null;
+
+function setup() {
   Gtk.init();
   Adw.init();
-  beforeAll(startLoop);
-  afterAll(stopLoop);
-  const display = Gdk.Display.get_default();
-  if (display === null) throw new Error("GTK tests need a display");
-  Gtk.IconTheme.get_for_display(display).add_search_path(Bun.fileURLToPath(new URL("../../resources", import.meta.url)));
+  const current = Gdk.Display.get_default();
+  if (current === null) throw new Error("GTK tests need a display");
+  Gtk.IconTheme.get_for_display(current).add_search_path(Bun.fileURLToPath(new URL("../../resources", import.meta.url)));
   const provider = new Gtk.CssProvider();
   const errors: string[] = [];
   provider.connect("parsing-error", (_provider, _section, error) => errors.push(error.message));
   provider.load_from_string(CSS);
   if (errors.length > 0) throw new Error(errors.join("\n"));
-  Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+  Gtk.StyleContext.add_provider_for_display(current, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+  return current;
+}
+
+export function useDisplay() {
+  display ??= setup();
+  beforeAll(startLoop);
+  afterAll(stopLoop);
   return display;
 }
 
 export const settle = (milliseconds = 150) => Bun.sleep(milliseconds);
+
+export async function until(predicate: () => boolean, timeout = 3000) {
+  const deadline = performance.now() + timeout;
+  while (!predicate() && performance.now() < deadline) await Bun.sleep(1);
+  expect(predicate()).toBe(true);
+}
 
 export function descendants(widget: Gtk.Widget): Gtk.Widget[] {
   const found = [widget];

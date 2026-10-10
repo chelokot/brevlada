@@ -202,6 +202,7 @@ export const glib = library("libglib-2.0.so.0", {
   g_variant_unref: unit,
   g_main_context_default: { args: [], returns: "ptr" },
   g_main_context_acquire: flag,
+  g_main_context_release: unit,
   g_main_context_prepare: { args: ["ptr", "ptr"], returns: "i32" },
   g_main_context_query: { args: ["ptr", "i32", "ptr", "ptr", "i32"], returns: "i32" },
   g_main_context_check: { args: ["ptr", "i32", "ptr", "i32"], returns: "i32" },

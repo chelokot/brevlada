@@ -31,15 +31,17 @@ export function wake() {
   glib.g_main_context_wakeup(context);
 }
 
-function resize() {
-  capacity = Math.max(count, capacity * 2, 16);
+const source = URL.createObjectURL(new Blob([`(${poller})()`], { type: "text/javascript" }));
+
+function allocate(size: number) {
+  capacity = size;
   descriptors = new Int32Array(new SharedArrayBuffer(capacity * 8));
   worker!.postMessage(descriptors);
 }
 
 function prepare() {
   glib.g_main_context_prepare(context, priority);
-  while ((count = glib.g_main_context_query(context, priority[0]!, timeout, descriptors, capacity)) > capacity) resize();
+  while ((count = glib.g_main_context_query(context, priority[0]!, timeout, descriptors, capacity)) > capacity) allocate(Math.max(count, capacity * 2));
   if (timeout[0] === 0) {
     libc.poll(descriptors, count, 0);
     return dispatch();
@@ -57,15 +59,17 @@ function dispatch() {
 export function startLoop() {
   if (worker) return;
   glib.g_main_context_acquire(context);
-  worker = new Worker(URL.createObjectURL(new Blob([`(${poller})()`], { type: "text/javascript" })));
+  worker = new Worker(source);
   worker.onmessage = dispatch;
   worker.ref();
-  resize();
+  allocate(Math.max(capacity, 16));
   prepare();
 }
 
 export function stopLoop() {
   clearImmediate(scheduled);
-  worker?.terminate();
+  if (!worker) return;
+  glib.g_main_context_release(context);
+  worker.terminate();
   worker = undefined;
 }

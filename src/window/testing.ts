@@ -1,4 +1,4 @@
-import { afterEach, expect } from "bun:test";
+import { afterEach } from "bun:test";
 import Adw from "gi://Adw?version=1";
 import Gio from "gi://Gio?version=2.0";
 import Gtk from "gi://Gtk?version=4.0";
@@ -15,18 +15,21 @@ import type { State } from "./state";
 export const account = (email: string): Account => ({ path: "", email, name: "", host: "", username: "", port: 993, ssl: true, tls: false, oauth2: false, smtp: null });
 
 const states: State[] = [];
+const apps: Adw.Application[] = [];
 
 export function useWindows() {
   useDisplay();
   afterEach(() => {
     for (const state of states.splice(0)) state.searchWorker.stop();
     for (const toplevel of Gtk.Window.list_toplevels()) if (toplevel instanceof Gtk.Window) toplevel.destroy();
+    for (const app of apps.splice(0)) for (const name of app.list_actions()) app.remove_action(name);
   });
 }
 
 export function testState(id: string, avatars = new Avatars(() => {})) {
   const app = new Adw.Application({ applicationId: `org.example.Brevlada${id}Diagnostic`, flags: Gio.ApplicationFlags.NON_UNIQUE });
   app.register(null);
+  apps.push(app);
   const shell = createShell(app);
   const [worker, commands] = MailWorker.recording();
   const state = createState(shell, worker, new Expansion(), avatars);
@@ -70,12 +73,6 @@ export function searchBar(entry: Gtk.SearchEntry) {
   const bar = entry.get_ancestor(Gtk.SearchBar.$gtype);
   if (!(bar instanceof Gtk.SearchBar)) throw new Error("Search entries belong to a search bar");
   return bar;
-}
-
-export async function until(predicate: () => boolean, timeout = 3000) {
-  const deadline = performance.now() + timeout;
-  while (!predicate() && performance.now() < deadline) await Bun.sleep(1);
-  expect(predicate()).toBe(true);
 }
 
 export function present<T>(value: T | null | undefined): T {
