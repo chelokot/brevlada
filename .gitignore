@@ -8,3 +8,4 @@ resources.gresource
 /.flatpak-builder/
 /node_modules/
 /.probe/
+/dist/

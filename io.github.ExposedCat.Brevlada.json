@@ -3,9 +3,6 @@
     "runtime": "org.gnome.Platform",
     "runtime-version": "50",
     "sdk": "org.gnome.Sdk",
-    "sdk-extensions": [
-        "org.freedesktop.Sdk.Extension.rust-stable"
-    ],
     "command": "brevlada",
     "finish-args": [
         "--socket=wayland",
@@ -19,16 +16,9 @@
         {
             "name": "brevlada",
             "buildsystem": "simple",
-            "build-options": {
-                "append-path": "/usr/lib/sdk/rust-stable/bin",
-                "env": {
-                    "CARGO_HOME": "/run/build/brevlada/cargo",
-                    "CARGO_NET_OFFLINE": "true"
-                }
-            },
             "build-commands": [
-                "cargo build --frozen --release",
-                "install -Dm755 target/release/brevlada /app/bin/brevlada",
+                "bun/bun-linux-*/bun build.ts",
+                "install -Dm755 dist/brevlada /app/bin/brevlada",
                 "install -Dm644 data/io.github.ExposedCat.Brevlada.service /app/share/dbus-1/services/io.github.ExposedCat.Brevlada.service",
                 "install -Dm644 data/io.github.ExposedCat.Brevlada.desktop /app/share/applications/io.github.ExposedCat.Brevlada.desktop",
                 "install -Dm644 data/io.github.ExposedCat.Brevlada.metainfo.xml /app/share/metainfo/io.github.ExposedCat.Brevlada.metainfo.xml",
@@ -41,14 +31,28 @@
                     "path": ".",
                     "skip": [
                         ".git",
-                        ".cargo",
-                        ".native",
+                        "node_modules",
+                        "dist",
                         ".flatpak",
-                        ".flatpak-builder",
-                        "target"
+                        ".flatpak-builder"
                     ]
                 },
-                "data/cargo-sources.json"
+                {
+                    "type": "archive",
+                    "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64.zip",
+                    "sha256": "36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913",
+                    "dest": "bun",
+                    "strip-components": 0,
+                    "only-arches": ["x86_64"]
+                },
+                {
+                    "type": "archive",
+                    "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-aarch64.zip",
+                    "sha256": "54328bbc2d9c8e0c9f892c544d66c57a83b84139e34909e5ee81758f1ac8fda7",
+                    "dest": "bun",
+                    "strip-components": 0,
+                    "only-arches": ["aarch64"]
+                }
             ]
         }
     ]

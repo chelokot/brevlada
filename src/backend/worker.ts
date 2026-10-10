@@ -1,6 +1,7 @@
 import { spawn } from "../gi";
 import type { Account } from "../models";
 import type { Status } from "../models/sync";
+import { backendWorker } from "../workers";
 import type { BodyRequest, Command, Event } from "./protocol";
 
 export type Delivered = Exclude<Event, { type: "SyncStatus" }>;
@@ -12,7 +13,7 @@ export class MailWorker {
   constructor(readonly send: (command: Command) => void) {}
 
   static start(path: string, listener: (event: Delivered) => void) {
-    const backend = spawn(new URL("./service.ts", import.meta.url));
+    const backend = spawn(backendWorker);
     const worker = new MailWorker((command) => backend.postMessage(command));
     backend.onmessage = ({ data }: MessageEvent<Event>) => {
       if (data.type === "SyncStatus") worker.#status = data.status;

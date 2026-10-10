@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "bun src/main.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "build": "bun build.ts"
   },
   "devDependencies": {
     "@girs/adw-1": "^5.5.0",

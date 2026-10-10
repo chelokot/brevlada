@@ -1,15 +1,30 @@
 import { glib, libc } from "./native";
 
+declare const self: Worker;
+
 const context = glib.g_main_context_default()!;
 const priority = new Int32Array(1);
 const timeout = new Int32Array(1);
 let capacity = 0;
 let descriptors: Int32Array<ArrayBufferLike> = new Int32Array(0);
 let count = 0;
-let poller: Worker | undefined;
+let worker: Worker | undefined;
 let scheduled: ReturnType<typeof setImmediate> | undefined;
 
 export const loop = { sleeping: false };
+
+function poller() {
+  const poll = import("bun:ffi").then(({ dlopen }) => dlopen("libc.so.6", { poll: { args: ["ptr", "u64", "i32"], returns: "i32" } }).symbols.poll);
+  let descriptors: Int32Array<ArrayBufferLike> = new Int32Array(2);
+  self.onmessage = async ({ data }: MessageEvent<Int32Array | { count: number; timeout: number }>) => {
+    if (data instanceof Int32Array) {
+      descriptors = data;
+      return;
+    }
+    (await poll)(descriptors, data.count, data.timeout);
+    self.postMessage(null);
+  };
+}
 
 export function wake() {
   loop.sleeping = false;
@@ -19,7 +34,7 @@ export function wake() {
 function resize() {
   capacity = Math.max(count, capacity * 2, 16);
   descriptors = new Int32Array(new SharedArrayBuffer(capacity * 8));
-  poller!.postMessage(descriptors);
+  worker!.postMessage(descriptors);
 }
 
 function prepare() {
@@ -30,7 +45,7 @@ function prepare() {
     return dispatch();
   }
   loop.sleeping = true;
-  poller!.postMessage({ count, timeout: timeout[0] });
+  worker!.postMessage({ count, timeout: timeout[0] });
 }
 
 function dispatch() {
@@ -40,17 +55,17 @@ function dispatch() {
 }
 
 export function startLoop() {
-  if (poller) return;
+  if (worker) return;
   glib.g_main_context_acquire(context);
-  poller = new Worker(new URL("./poller.ts", import.meta.url));
-  poller.onmessage = dispatch;
-  poller.ref();
+  worker = new Worker(URL.createObjectURL(new Blob([`(${poller})()`], { type: "text/javascript" })));
+  worker.onmessage = dispatch;
+  worker.ref();
   resize();
   prepare();
 }
 
 export function stopLoop() {
   clearImmediate(scheduled);
-  poller?.terminate();
-  poller = undefined;
+  worker?.terminate();
+  worker = undefined;
 }
