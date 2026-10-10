@@ -31,7 +31,7 @@ export async function certificate() {
   await $`openssl req -x509 -newkey rsa:2048 -nodes -keyout ${directory}/key.pem -out ${directory}/cert.pem -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost,IP:127.0.0.1`.quiet();
   const [cert, key] = await Promise.all([Bun.file(`${directory}/cert.pem`).text(), Bun.file(`${directory}/key.pem`).text()]);
   rmSync(directory, { recursive: true });
-  certificates.push(cert);
+  certificates().push(cert);
   return { cert, key };
 }
 

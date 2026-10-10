@@ -1,7 +1,8 @@
 import tls from "node:tls";
 import type { Socket, SocketHandler } from "bun";
 
-export const certificates = [...tls.getCACertificates("system")];
+let trusted: string[] | null = null;
+export const certificates = () => (trusted ??= [...tls.getCACertificates("system")]);
 const encoder = new TextEncoder();
 
 export class Stream {
@@ -31,7 +32,7 @@ export class Stream {
   }
 
   async upgrade(serverName: string): Promise<void> {
-    this.#socket = this.#socket.upgradeTLS<Stream>({ data: this, tls: { ca: certificates, serverName }, socket: Stream.#handlers })[1];
+    this.#socket = this.#socket.upgradeTLS<Stream>({ data: this, tls: { ca: certificates(), serverName }, socket: Stream.#handlers })[1];
     while (!this.#secured) {
       if (this.#ended) throw this.#error ?? new Error("Connection closed during TLS handshake");
       await this.#wait();

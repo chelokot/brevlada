@@ -24,7 +24,7 @@ export async function get(url: string, token: string | null): Promise<Response> 
   if (token !== null) headers.set("Authorization", `Bearer ${token}`);
   for (let redirects = 0; ; redirects++) {
     if (!url.startsWith("https://")) throw new Error(`configured for https only: ${url}`);
-    const response = await fetch(url, { headers, redirect: "manual", signal, tls: { ca: certificates } });
+    const response = await fetch(url, { headers, redirect: "manual", signal, tls: { ca: certificates() } });
     const location = response.headers.get("Location");
     if (location === null || !REDIRECTS.includes(response.status)) return new Response(response.status, await read(response));
     if (redirects === 10) throw new Error("too many redirects");
@@ -60,7 +60,7 @@ export async function unsubscribeWith(url: string, timeout: number): Promise<Uns
     body: "List-Unsubscribe=One-Click",
     redirect: "manual",
     signal: AbortSignal.timeout(timeout),
-    tls: { ca: certificates },
+    tls: { ca: certificates() },
   });
   if (REDIRECTS.includes(response.status)) return "UseBrowser";
   if (!response.ok) throw new Error(`Unsubscribe server returned HTTP ${response.status}`);
