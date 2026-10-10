@@ -1,6 +1,8 @@
 import { spawn } from "../gi";
 import type { Message } from "../models";
 import { filters, type Filters } from "../models/search";
+import { searchWorker } from "../workers";
+import { pack, type Packed, References, type Wire } from "./search/wire";
 
 export interface Location {
   account: string;
@@ -40,7 +42,7 @@ export interface Response {
 
 export type Query = Omit<Request, "messages" | "senderMessages"> & { ticket: number };
 
-export type Input = { tickets: Int32Array } | { query: Query; messages: Message[] | null; senderMessages: Message[] | null };
+export type Input = string | { tickets: Int32Array } | { query: Query; messages: Packed | null; senderMessages: Packed | null };
 
 export const locationKey = ({ account, folder }: Location, sender: string) => `${account.length}:${account}${folder.length}:${folder}${sender}`;
 
@@ -53,12 +55,14 @@ type Snapshot = Pick<Request, "messages" | "senderMessages">;
 const unsent = (): Snapshot => ({ messages: [], senderMessages: null });
 
 export class Search {
-  readonly #worker = spawn(new URL("./search/worker.ts", import.meta.url));
+  readonly #worker = spawn(searchWorker);
   readonly #tickets = new Int32Array(new SharedArrayBuffer(8));
   readonly #sent: [Snapshot, Snapshot] = [unsent(), unsent()];
+  readonly #headers = new Map<number, Message>();
+  readonly #references = new References();
 
   private constructor(receive: (response: Response) => void) {
-    this.#worker.onmessage = ({ data }: MessageEvent<string>) => receive(JSON.parse(data));
+    this.#worker.onmessage = ({ data }: MessageEvent<string>) => receive(this.#decode(JSON.parse(data)));
     this.#worker.postMessage({ tickets: this.#tickets } satisfies Input);
   }
 
@@ -70,11 +74,30 @@ export class Search {
     const index = lane(request.threads);
     const sent = this.#sent[index];
     this.#sent[index] = { messages, senderMessages };
+    const snapshot = (current: Message[] | null, previous: Message[] | null) => {
+      if (current === previous) return null;
+      const [packed, texts] = pack(current ?? []);
+      this.#worker.postMessage(texts satisfies Input);
+      return packed;
+    };
     this.#worker.postMessage({
       query: { ...request, ticket: Atomics.add(this.#tickets, index, 1) + 1 },
-      messages: messages === sent.messages ? null : messages,
-      senderMessages: senderMessages === sent.senderMessages ? null : (senderMessages ?? []),
+      messages: snapshot(messages, sent.messages),
+      senderMessages: snapshot(senderMessages, sent.senderMessages),
     } satisfies Input);
+  }
+
+  #decode({ headers, groups, ...response }: Wire): Response {
+    for (const [ref, header] of headers) this.#headers.set(ref, header);
+    const decoded = groups.map((group) => group.map((ref) => this.#header(ref)));
+    if (response.complete) this.#references.complete(response.threads, groups.flat(), this.#headers);
+    return { ...response, groups: decoded };
+  }
+
+  #header(ref: number): Message {
+    const header = this.#headers.get(ref);
+    if (!header) throw new Error("Search response refers to an unknown message");
+    return { ...header };
   }
 
   cancel(threads: boolean): void {

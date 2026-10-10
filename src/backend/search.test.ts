@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { message, type Message } from "../models";
 import { preview } from "../models/senders";
 import { request, Search, type Request, type Response, type Scope } from "./search";
-import { Entry } from "./search/senders";
+import { Entry, pairs } from "./search/senders";
 import { Storage } from "./storage";
 
 function start() {
@@ -168,16 +168,16 @@ test("header matches and a disabled body do not decode HTML", () => {
   const source = message({ subject: "Delivery", bodyHtml: "<style>hidden</style><p>Visible &amp; searchable</p>" });
   const entry = Entry.memory(source);
   const query = request(false, "delivery", null, null, []);
-  expect(entry.matches(query)).toBe(true);
+  expect(entry.matches(query, pairs(query.query))).toBe(true);
   expect(entry.fields[6]).toBeUndefined();
   query.query = "visible & searchable";
   query.filters.sources[5] = false;
-  expect(entry.matches(query)).toBe(false);
+  expect(entry.matches(query, pairs(query.query))).toBe(false);
   expect(entry.fields[6]).toBeUndefined();
   query.filters.sources[5] = true;
-  expect(entry.matches(query)).toBe(true);
+  expect(entry.matches(query, pairs(query.query))).toBe(true);
   query.query = "hidden";
-  expect(entry.matches(query)).toBe(false);
+  expect(entry.matches(query, pairs(query.query))).toBe(false);
 });
 
 test("streams partial results and finishes with matching previews", async () => {
@@ -203,6 +203,39 @@ test("streams partial results and finishes with matching previews", async () => 
   search.submit(request(false, "missing", null, null, []));
   const empty = await next();
   expect([empty.complete, empty.groups]).toEqual([true, []]);
+  search.stop();
+});
+
+test("repeated responses reuse sent headers without sharing message objects", async () => {
+  const { search, run } = start();
+  const messages = sample();
+  const first = await run(request(false, "needle", null, null, messages));
+  const [group] = first.groups;
+  const [header] = group ?? [];
+  if (!header) throw new Error("Missing search result");
+  header.isRead = true;
+  await run(request(false, "missing", null, null, messages));
+  const again = await run(request(false, "needle", null, null, messages));
+  expect(again.groups).toEqual((await run(request(false, "needle", null, null, messages))).groups);
+  expect(again.groups[0]?.[0]?.isRead).toBe(false);
+  search.stop();
+});
+
+test("the in-memory prefilter never drops a matching message", async () => {
+  const texts = ["Invoice 42 from ACME", "Ünïcödé Straße", "ΟΔΟΣ αγάπης", "🎉 party tonight", "meeting at noon", "zz top", "i̇stanbul", "x"];
+  const messages = texts.flatMap((text, index) => [
+    message({ uid: index * 3 + 1, timestamp: index, sender: `s${index}@example.com`, subject: text }),
+    message({ uid: index * 3 + 2, timestamp: index, sender: `t${index}@example.com`, bodyText: `Body: ${text}` }),
+    message({ uid: index * 3 + 3, timestamp: index, sender: `u${index}@example.com`, cc: text.toUpperCase() }),
+  ]);
+  const { search, run } = start();
+  for (const query of ["invoice", "42 f", "ünï", "straße", "οδος", "γάπ", "🎉", "party", "noon", "zz", "i̇st", "x", "acme", "body: z", "missing"]) {
+    const expected = messages
+      .filter(({ subject, sender, replyTo, recipients, cc, bodyText }) => [subject, sender, replyTo, recipients, cc, bodyText].some((field) => field.toLowerCase().includes(query)))
+      .map(({ uid }) => uid)
+      .sort((a, b) => a - b);
+    expect([query, uids(await run(request(false, query, null, null, messages))).sort((a, b) => a - b)]).toEqual([query, expected]);
+  }
   search.stop();
 });
 

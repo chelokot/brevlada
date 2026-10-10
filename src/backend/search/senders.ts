@@ -6,7 +6,18 @@ import { locationKey, type Location, type Query, type Response } from "../search
 import { Storage } from "../storage";
 
 export type Work = Query & { messages: Message[]; senderMessages: Message[] };
-export type Group = [location: Location | null, messages: Message[]];
+
+export interface Item {
+  readonly ref: number;
+  header(): Message;
+}
+
+export type Group = [location: Location | null, items: Item[]];
+export type Send = (response: Omit<Response, "groups" | "locations">, groups: Group[]) => void;
+
+let references = 0;
+export const reference = () => ++references;
+export const item = (message: Message): Item => ({ ref: reference(), header: () => message });
 
 export const sameFields = (a: Message, b: Message) =>
   a.subject === b.subject &&
@@ -20,10 +31,16 @@ export const sameFields = (a: Message, b: Message) =>
 const sameLocation = (a: Location | null, b: Location) => a !== null && a.account === b.account && a.folder === b.folder;
 const newestFirst = (a: Message, b: Message) => b.timestamp - a.timestamp || b.uid - a.uid;
 const FIELDS = [0, 1, 2, 3, 4, 5, 6];
+const BUCKETS = 2048;
+
+const scratch = new Uint8Array(BUCKETS);
+const pair = (text: string, index: number) => (text.charCodeAt(index) * 31 + text.charCodeAt(index + 1)) & (BUCKETS - 1);
+export const pairs = (query: string) => [...new Set(Array.from({ length: Math.max(query.length - 1, 0) }, (_, index) => pair(query, index)))];
 
 export function sortGroups(groups: Group[], { unreadFirst, scope, deferredRead }: Work): Group[] {
   const ranked = groups.map((group) => {
-    const [location, messages] = group;
+    const [location, items] = group;
+    const messages = items.map((item) => item.header());
     const newest = messages.reduce((best, message) => (newestFirst(best, message) > 0 ? message : best));
     const deferred = location === null || (scope !== null && sameLocation(scope.current, location));
     const unread = unreadFirst && messages.some((message) => !message.isRead || (deferred && deferredRead.has(message.uid)));
@@ -32,9 +49,13 @@ export function sortGroups(groups: Group[], { unreadFirst, scope, deferredRead }
   return ranked.sort(({ rank: a }, { rank: b }) => b[0] - a[0] || b[1] - a[1] || b[2] - a[2]).map(({ group }) => group);
 }
 
-export class Entry {
+export class Entry implements Item {
   readonly sender: string;
   readonly fields: (string | undefined)[] = [];
+  #ref = reference();
+  #header: Message | null = null;
+  #prefiltered = false;
+  #signature: Int32Array | null = null;
 
   constructor(
     public message: Message,
@@ -44,13 +65,47 @@ export class Entry {
     this.sender = key(message);
   }
 
-  static memory(message: Message): Entry {
-    return new Entry(message, () => message.bodyText, () => message.bodyHtml && htmlText(message.bodyHtml));
+  get ref(): number {
+    return this.#ref;
   }
 
-  matches({ filters, query }: Pick<Query, "filters" | "query">): boolean {
+  update(message: Message) {
+    this.message = message;
+    this.#ref = reference();
+    this.#header = null;
+  }
+
+  static memory(message: Message): Entry {
+    const entry = new Entry(message, () => message.bodyText, () => message.bodyHtml && htmlText(message.bodyHtml));
+    entry.#prefiltered = !message.bodyHtml;
+    return entry;
+  }
+
+  matches({ filters, query }: Pick<Query, "filters" | "query">, hashes: number[]): boolean {
     if (!includesDate(filters, this.message.timestamp)) return false;
-    return !query || FIELDS.some((index) => filters.sources[Math.min(index, 5)] && (this.fields[index] ??= this.#raw(index).toLowerCase()).includes(query));
+    if (!query) return true;
+    if (this.#prefiltered && !this.#covers(hashes)) return false;
+    return FIELDS.some((index) => filters.sources[Math.min(index, 5)] && this.#field(index).includes(query));
+  }
+
+  #field(index: number): string {
+    return (this.fields[index] ??= this.#raw(index).toLowerCase());
+  }
+
+  #covers(hashes: number[]): boolean {
+    const signature = (this.#signature ??= this.#sign());
+    return hashes.every((hash) => (Atomics.load(signature, hash >>> 5) & (1 << (hash & 31))) !== 0);
+  }
+
+  #sign(): Int32Array {
+    const signature = new Int32Array(BUCKETS / 32);
+    for (const index of FIELDS.slice(0, 6)) {
+      const text = this.#field(index);
+      for (let position = 0; position < text.length - 1; position++) scratch[pair(text, position)] = 1;
+    }
+    scratch.forEach((present, bucket) => present && Atomics.or(signature, bucket >>> 5, 1 << (bucket & 31)));
+    scratch.fill(0);
+    return signature;
   }
 
   #raw(index: number): string {
@@ -59,35 +114,39 @@ export class Entry {
   }
 
   header(): Message {
-    return listHeader(this.message, false);
+    return (this.#header ??= { ...listHeader(this.message, false), searchMatch: true });
   }
 }
 
 class Progress {
   readonly #groups = new Map<string, Group>();
+  readonly #hashes: number[];
   #lastSent: number | null = null;
 
   constructor(
     readonly work: Work,
     readonly current: () => boolean,
-    readonly post: (response: Response) => void,
-  ) {}
+    readonly send: Send,
+  ) {
+    this.#hashes = pairs(work.query);
+  }
 
   visit(location: Location | null, entry: Entry): boolean {
     if (!this.current()) return false;
-    if (!entry.matches(this.work)) return true;
+    if (!entry.matches(this.work, this.#hashes)) return true;
     const id = location === null ? entry.sender : locationKey(location, entry.sender);
     let group = this.#groups.get(id);
     if (!group) this.#groups.set(id, (group = [location, []]));
-    group[1].push({ ...entry.header(), searchMatch: true });
+    group[1].push(entry);
     return this.#lastSent === null || performance.now() - this.#lastSent >= 60 ? this.publish(false) : true;
   }
 
   publish(complete: boolean): boolean {
     if (!this.current()) return false;
-    const groups = sortGroups([...this.#groups.values()].map(([location, group]) => [location, group.sort(newestFirst)]), this.work);
+    const newest = (a: Item, b: Item) => newestFirst(a.header(), b.header());
+    const groups = sortGroups([...this.#groups.values()].map(([location, group]) => [location, group.sort(newest)]), this.work);
     const { threads, ticket, query } = this.work;
-    this.post({ threads, ticket, query, groups: groups.map(([, group]) => group), locations: groups.map(([location]) => location), error: null, complete });
+    this.send({ threads, ticket, query, error: null, complete }, groups);
     this.#lastSent = performance.now();
     return true;
   }
@@ -105,8 +164,8 @@ export class Cache {
   #storage: Storage | null = null;
   readonly #mailboxes = new Map<string, Mailbox>();
 
-  search(work: Work, current: () => boolean, post: (response: Response) => void): void {
-    const progress = new Progress(work, current, post);
+  search(work: Work, current: () => boolean, send: Send): void {
+    const progress = new Progress(work, current, send);
     const { scope } = work;
     if (scope) {
       if (this.#path !== scope.cachePath) {
@@ -156,7 +215,7 @@ export class Cache {
       if (!current()) return false;
       seen.add(message.uid);
       let entry = entries.get(message.uid);
-      if (entry && sameFields(entry.message, message)) entry.message = message;
+      if (entry && sameFields(entry.message, message)) entry.update(message);
       else entries.set(message.uid, (entry = Entry.memory(message)));
       return progress.visit(location, entry);
     };

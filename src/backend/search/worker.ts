@@ -1,8 +1,9 @@
 import { listHeader, prepareDisplay, threads, type Message } from "../../models";
 import { fields, includesDate, matchesFields } from "../../models/search";
 import { key } from "../../models/senders";
-import type { Input, Query, Response } from "../search";
-import { Cache, sameFields, sortGroups, type Group, type Work } from "./senders";
+import type { Input, Query } from "../search";
+import { Cache, type Group, item, sameFields, type Send, sortGroups, type Work } from "./senders";
+import { type Packed, References, unpack, type Wire } from "./wire";
 
 declare const self: Worker;
 
@@ -34,6 +35,23 @@ const cache = new Cache();
 let index: Index | null = null;
 let next: 0 | 1 = 0;
 let running = false;
+const sent = new Set<number>();
+const references = new References();
+
+const send: Send = (response, groups) => {
+  const headers: Wire["headers"] = [];
+  const refs = groups.map(([, items]) =>
+    items.map((item) => {
+      if (!sent.has(item.ref)) {
+        sent.add(item.ref);
+        headers.push([item.ref, item.header()]);
+      }
+      return item.ref;
+    }),
+  );
+  if (response.complete) references.complete(response.threads, refs.flat(), sent);
+  self.postMessage(JSON.stringify({ ...response, locations: groups.map(([location]) => location), groups: refs, headers } satisfies Wire));
+};
 
 const identity = (message: Message) => `${message.uid}:${message.messageId}`;
 
@@ -71,21 +89,18 @@ function threadGroups({ entries }: Index, work: Work, current: () => boolean): G
   }
   return threads(matched, "")
     .filter((group) => group.some((message) => key(message) === work.sender))
-    .map((group) => [null, group]);
+    .map((group) => [null, group.map(item)]);
 }
 
 function execute(work: Work) {
   const current = () => Atomics.load(tickets, Number(work.threads)) === work.ticket;
-  const post = (response: Response) => self.postMessage(JSON.stringify(response));
+  const { threads, ticket, query } = work;
   if (!current()) return;
-  if (!work.threads) {
+  if (!threads) {
     try {
-      cache.search(work, current, post);
+      cache.search(work, current, send);
     } catch (error) {
-      if (current()) {
-        const message = error instanceof Error ? error.message : String(error);
-        post({ threads: false, ticket: work.ticket, query: work.query, groups: [], locations: [], error: message, complete: true });
-      }
+      if (current()) send({ threads, ticket, query, error: error instanceof Error ? error.message : String(error), complete: true }, []);
     }
     return;
   }
@@ -94,9 +109,7 @@ function execute(work: Work) {
   index = built;
   const groups = threadGroups(built, work, current);
   if (groups === null || !current()) return;
-  const sorted = sortGroups(groups, work);
-  const { threads, ticket, query } = work;
-  post({ threads, ticket, query, groups: sorted.map(([, group]) => group), locations: sorted.map(([location]) => location), error: null, complete: true });
+  send({ threads, ticket, query, error: null, complete: true }, sortGroups(groups, work));
 }
 
 async function run() {
@@ -112,14 +125,25 @@ async function run() {
   running = false;
 }
 
+const texts: string[] = [];
+const unpacked = (packed: Packed) => {
+  const text = texts.shift();
+  if (text === undefined) throw new Error("Search snapshot arrived without its texts");
+  return unpack(packed, text);
+};
+
 self.onmessage = ({ data }: MessageEvent<Input>) => {
+  if (typeof data === "string") {
+    texts.push(data);
+    return;
+  }
   if ("tickets" in data) {
     tickets = data.tickets;
     return;
   }
   const lane = lanes[data.query.threads ? 1 : 0];
-  if (data.messages) lane.messages = data.messages;
-  if (data.senderMessages) lane.senderMessages = data.senderMessages;
+  if (data.messages) lane.messages = unpacked(data.messages);
+  if (data.senderMessages) lane.senderMessages = unpacked(data.senderMessages);
   lane.pending = data.query;
   if (!running) void run();
 };

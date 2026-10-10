@@ -263,6 +263,22 @@ test("finds a locally sent reply in a received thread", () => {
   expect(storage.relatedSent("me@example.com", "INBOX", [received])).toEqual([{ folder: "", message: sent }]);
 });
 
+test("keeps locally sent messages apart from mailbox rows and replaces them by Message-ID", () => {
+  const storage = Storage.open(":memory:");
+  const sent = ["one", "two", "three"].map((messageId) => message({ messageId, sender: "me@example.com", references: ["incoming"] }));
+  sent.forEach((item) => storage.storeSent("me@example.com", item));
+  storage.storeSent("me@example.com", { ...sent[0], subject: "Edited" } as typeof sent[number]);
+  [1, 2, 3].forEach((uid) => storage.store("me@example.com", "INBOX", message({ uid, messageId: `inbox-${uid}` })));
+  const related = storage.relatedSent("me@example.com", "Archive", [message({ messageId: "incoming" })]);
+  expect(related.map(({ message }) => [message.messageId, message.subject])).toEqual([
+    ["one", "Edited"],
+    ["three", ""],
+    ["two", ""],
+  ]);
+  expect([1, 2, 3].map((uid) => storage.message("me@example.com", "INBOX", uid)?.messageId)).toEqual(["inbox-1", "inbox-2", "inbox-3"]);
+  expect(storage.message("me@example.com", "Missing", 1)).toBeNull();
+});
+
 test("caches one saved draft without removing other drafts and rejects a stale validity", () => {
   const storage = Storage.open(":memory:");
   const existing = message({ uid: 1, uidValidity: 7, messageId: "existing", isDraft: true, bodyLoaded: true, bodyText: "Keep this draft" });

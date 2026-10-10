@@ -1,10 +1,11 @@
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Message } from "../src/models";
+import { prepareDisplay, threads, type Message } from "../src/models";
 import { groups, key } from "../src/models/senders";
 import { parse } from "../src/backend/parser";
 import { request, Search, type Request, type Response } from "../src/backend/search";
 import { Storage } from "../src/backend/storage";
+import { document } from "../src/components/html";
 
 const ACCOUNT = "bench@brevlada.test";
 const FOLDER = "INBOX";
@@ -61,6 +62,17 @@ await repeat("message_lookup", 3, () =>
   Array.from({ length: 2000 }, (_, index) => ((index + 1) * 7919) % uids.length + 1).filter((uid) => storage.message(ACCOUNT, FOLDER, uid) !== null).length,
 );
 
+await repeat("threads", 5, () => threads(list, "").length);
+await repeat("sender_groups", 5, () => groups(list, "").length);
+const letters = full.filter(({ bodyHtml }) => bodyHtml).slice(0, 1000);
+await repeat("render_letter", 3, () =>
+  letters.reduce((sum, source) => {
+    const letter = { ...source };
+    prepareDisplay(letter);
+    return sum + document(letter, true, false).length;
+  }, 0),
+);
+
 let resolve: (response: Response) => void = () => {};
 const search = Search.start((response) => {
   if (response.complete && search.accepts(response)) resolve(response);
@@ -75,7 +87,7 @@ const sequential = async (build: (query: string) => Request) => {
   for (const query of QUERIES) total += await wait(build(query));
   return total;
 };
-await repeat("search_memory", 3, () => sequential((query) => request(false, query, null, null, full)));
+await repeat("search_memory", 3, () => sequential((query) => request(false, query, null, null, list)));
 await repeat("search_cache", 3, () =>
   sequential((query) => ({ ...request(false, query, null, null, []), scope: { current: null, folder: null, accounts: [ACCOUNT], cachePath: database, revision: 1 } })),
 );
