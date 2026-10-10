@@ -23,6 +23,7 @@ const button = {
 } as const;
 const narrow = { expand: [127, 77], threadSort: [882, 77] } as const;
 const draftSaved = 3000;
+const keyboardFocusHidden = 3500;
 
 async function conversation(ui: Step, row: number, threadRow: number) {
   await ui.click(...account.alice);
@@ -377,10 +378,10 @@ const scenarios: Scenario[] = [
       await ui.settle();
       await ui.click(1150, 190);
       await ui.key("Delete");
-      await ui.shot("thread-deleted-by-shortcut");
+      await ui.shot("thread-deleted-by-shortcut", keyboardFocusHidden);
       await ui.click(1150, 160);
       await ui.key("BackSpace");
-      await ui.shot("thread-archived-by-shortcut");
+      await ui.shot("thread-archived-by-shortcut", keyboardFocusHidden);
     },
   },
   {
