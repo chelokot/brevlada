@@ -17,8 +17,12 @@ const day = (value: string) => {
 const dateControls = (filters: SearchFilters) => {
   const picker = filters["from"].get_parent()?.get_last_child();
   const reveal = filters["to"].get_parent()?.get_next_sibling();
-  const calendar = reveal instanceof Gtk.Revealer ? reveal.get_child() : null;
-  if (!(picker instanceof Gtk.ToggleButton && reveal instanceof Gtk.Revealer && calendar instanceof Gtk.Calendar)) throw new Error("Date popup has a picker and calendar");
+  if (!(picker instanceof Gtk.ToggleButton && reveal instanceof Gtk.Revealer)) throw new Error("Date popup has a picker and a calendar revealer");
+  const calendar = () => {
+    const shown = reveal.get_child();
+    if (!(shown instanceof Gtk.Calendar)) throw new Error("Date popup shows a calendar");
+    return shown;
+  };
   return { picker, reveal, calendar };
 };
 
@@ -35,21 +39,22 @@ test("date calendar stays in one popup and restores focus", async () => {
   const popup = filters["datesButton"].get_popover();
   if (popup === null) throw new Error("Dates button has a popover");
   const { picker, reveal, calendar } = dateControls(filters);
+  expect(reveal.get_child()).toBeNull();
   for (const selected of [false, true]) {
     filters["datesButton"].popup();
     await settle(350);
     picker.set_active(true);
     await settle(350);
-    expect(calendar.get_ancestor(Gtk.Popover.$gtype)).toBe(popup);
+    expect(calendar().get_ancestor(Gtk.Popover.$gtype)).toBe(popup);
     expect(popup.get_autohide()).toBe(true);
     expect(popup.get_visible()).toBe(true);
     expect(reveal.get_reveal_child()).toBe(true);
-    const [, bounds] = calendar.compute_bounds(popup);
+    const [, bounds] = calendar().compute_bounds(popup);
     expect(bounds.get_x()).toBeGreaterThanOrEqual(0);
     expect(bounds.get_x() + bounds.get_width()).toBeLessThanOrEqual(popup.get_width());
     expect(filters["from"].get_width()).toBeGreaterThanOrEqual(150);
     if (selected) {
-      calendar.select_day(day("2026-10-01T12:00:00Z"));
+      calendar().select_day(day("2026-10-01T12:00:00Z"));
       await settle(350);
       expect(filters["from"].get_text()).toBe("2026-10-01");
       expect(reveal.get_reveal_child()).toBe(false);
@@ -145,7 +150,7 @@ test("controls follow the current account and keep custom selections", () => {
   expect(filters["dateError"].get_visible()).toBe(false);
   const { picker, calendar } = dateControls(filters);
   picker.set_active(true);
-  calendar.select_day(day("2026-10-01T12:00:00Z"));
+  calendar().select_day(day("2026-10-01T12:00:00Z"));
   expect(filters["from"].get_text()).toBe("2026-10-01");
   const clear = filters["to"].get_parent()?.get_parent()?.get_last_child();
   if (!(clear instanceof Gtk.Button)) throw new Error("Dates end with a clear button");

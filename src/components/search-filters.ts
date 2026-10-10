@@ -246,13 +246,29 @@ function dateInput(parent: Gtk.Box, label: string): [Gtk.Entry, Gtk.ToggleButton
 function dateInputs(parent: Gtk.Box, popover: Gtk.Popover): [Gtk.Entry, Gtk.Entry] {
   const [from, fromPick] = dateInput(parent, "From");
   const [to, toPick] = dateInput(parent, "To");
-  const calendar = new Gtk.Calendar();
-  calendar.add_css_class("search-calendar");
-  calendar.set_overflow(Gtk.Overflow.HIDDEN);
-  const reveal = new Gtk.Revealer({ child: calendar });
+  const reveal = new Gtk.Revealer();
   parent.append(reveal);
   let target: Gtk.Entry | null = null;
   let syncing = false;
+  const calendar = () => {
+    const shown = reveal.get_child();
+    if (shown instanceof Gtk.Calendar) return shown;
+    const created = new Gtk.Calendar();
+    created.add_css_class("search-calendar");
+    created.set_overflow(Gtk.Overflow.HIDDEN);
+    created.connect("day-selected", (calendar) => {
+      const entry = target;
+      if (syncing || entry === null) return;
+      const date = calendar.get_date();
+      const pad = (value: number, width: number) => String(value).padStart(width, "0");
+      entry.set_text(`${pad(date.get_year(), 4)}-${pad(date.get_month(), 2)}-${pad(date.get_day_of_month(), 2)}`);
+      entry.grab_focus();
+      fromPick.set_active(false);
+      toPick.set_active(false);
+    });
+    reveal.set_child(created);
+    return created;
+  };
   const pickers: [Gtk.Entry, Gtk.ToggleButton, Gtk.ToggleButton][] = [
     [from, fromPick, toPick],
     [to, toPick, fromPick],
@@ -266,23 +282,14 @@ function dateInputs(parent: Gtk.Box, popover: Gtk.Popover): [Gtk.Entry, Gtk.Entr
         target = entry;
         const range = dates(entry.get_text(), "");
         const date = range.ok && range.value[0] !== null ? GLib.DateTime.new_from_iso8601(`${range.value[0]}T12:00:00Z`, null) : null;
-        if (date !== null) calendar.select_day(date);
+        if (date !== null) calendar().select_day(date);
       } else target = null;
       reveal.set_reveal_child(pick.get_active());
-      if (pick.get_active()) calendar.grab_focus();
+      if (pick.get_active()) calendar().grab_focus();
       syncing = false;
     });
   }
-  calendar.connect("day-selected", (calendar) => {
-    const entry = target;
-    if (syncing || entry === null) return;
-    const date = calendar.get_date();
-    const pad = (value: number, width: number) => String(value).padStart(width, "0");
-    entry.set_text(`${pad(date.get_year(), 4)}-${pad(date.get_month(), 2)}-${pad(date.get_day_of_month(), 2)}`);
-    entry.grab_focus();
-    fromPick.set_active(false);
-    toPick.set_active(false);
-  });
+  popover.connect("show", () => void calendar());
   popover.connect("closed", () => {
     fromPick.set_active(false);
     toPick.set_active(false);
