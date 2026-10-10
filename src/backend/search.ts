@@ -55,32 +55,42 @@ type Snapshot = Pick<Request, "messages" | "senderMessages">;
 const unsent = (): Snapshot => ({ messages: [], senderMessages: null });
 
 export class Search {
-  readonly #worker = spawn(searchWorker);
+  #worker: Worker | null = null;
   readonly #tickets = new Int32Array(new SharedArrayBuffer(8));
   readonly #sent: [Snapshot, Snapshot] = [unsent(), unsent()];
   readonly #headers = new Map<number, Message>();
   readonly #references = new References();
 
+  readonly #receive: (response: Response) => void;
+
   private constructor(receive: (response: Response) => void) {
-    this.#worker.onmessage = ({ data }: MessageEvent<string>) => receive(this.#decode(JSON.parse(data)));
-    this.#worker.postMessage({ tickets: this.#tickets } satisfies Input);
+    this.#receive = receive;
   }
 
   static start(receive: (response: Response) => void): Search {
     return new Search(receive);
   }
 
+  #connected(): Worker {
+    if (this.#worker) return this.#worker;
+    const worker = (this.#worker = spawn(searchWorker));
+    worker.onmessage = ({ data }: MessageEvent<string>) => this.#receive(this.#decode(JSON.parse(data)));
+    worker.postMessage({ tickets: this.#tickets } satisfies Input);
+    return worker;
+  }
+
   submit({ messages, senderMessages, ...request }: Request): void {
+    const worker = this.#connected();
     const index = lane(request.threads);
     const sent = this.#sent[index];
     this.#sent[index] = { messages, senderMessages };
     const snapshot = (current: Message[] | null, previous: Message[] | null) => {
       if (current === previous) return null;
       const [packed, texts] = pack(current ?? []);
-      this.#worker.postMessage(texts satisfies Input);
+      worker.postMessage(texts satisfies Input);
       return packed;
     };
-    this.#worker.postMessage({
+    worker.postMessage({
       query: { ...request, ticket: Atomics.add(this.#tickets, index, 1) + 1 },
       messages: snapshot(messages, sent.messages),
       senderMessages: snapshot(senderMessages, sent.senderMessages),
@@ -109,6 +119,6 @@ export class Search {
   }
 
   stop(): void {
-    this.#worker.terminate();
+    if (this.#worker) this.#worker.terminate();
   }
 }
