@@ -31,6 +31,12 @@ test("handles empty and truncates unicode", () => {
   expect(message(create({ bodyText: `${"a".repeat(159)} ${"😀".repeat(5)}` }))).toBe(`${"a".repeat(159)}…`);
 });
 
+test("stops reading long html once the preview is full", () => {
+  const bodyHtml = Array.from({ length: 400 }, (_, index) => `<p>Paragraph ${index} &amp;\n\t words</p>`).join("");
+  const full = Array.from({ length: 400 }, (_, index) => `Paragraph ${index} & words`).join(" ");
+  expect(message(create({ bodyHtml }))).toBe(`${full.slice(0, 160).trimEnd()}…`);
+});
+
 test("follows html5ever head handling", () => {
   for (const bodyHtml of ["<html><head><title>Title</title><body><p>Body</p>", "<title>Title</title><p>Body</p>", "<p>Body</p></body></html><html><head></head>"])
     expect(message(create({ bodyHtml }))).toBe("Body");

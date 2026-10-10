@@ -55,7 +55,7 @@ function normalizedHtml(source: string) {
   const styles = descendants(root).filter((element) => element.name === "style" && ancestors(element).some((parent) => parent.name === "head"));
   const body = descendants(root).find((element) => element.name === "body");
   const attributes = body ? body.attributes.filter(([name]) => BODY.has(name)).map(([name, value]) => ` ${name}="${escape(decode(value, true))}"`) : [];
-  return `${html(styles.toArray(), "head")}<div${attributes.join("")}>${html(content(root.children), "body")}</div>`;
+  return `${html(styles)}<div${attributes.join("")}>${html(content(root.children))}</div>`;
 }
 
 export function plainText(text: string, hideQuotes: boolean) {

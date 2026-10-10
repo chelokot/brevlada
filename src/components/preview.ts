@@ -11,7 +11,7 @@ const BLOCKS = new Set(
 export function message(source: Message) {
   if (source.listPreview !== null) return source.listPreview;
   if (isReply(source)) return "";
-  const content = collapse(source.bodyText.trim() ? prefix(source.bodyText, 4096) : text(parse(source.bodyHtml), SKIP, BLOCKS));
+  const content = collapse(source.bodyText.trim() ? prefix(source.bodyText, 4096) : text(parse(source.bodyHtml), SKIP, BLOCKS, "", 322));
   const characters = Array.from(content.slice(0, 322));
   return characters.length > 160 ? `${characters.slice(0, 160).join("").trimEnd()}…` : content;
 }

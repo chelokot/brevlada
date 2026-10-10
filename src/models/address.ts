@@ -7,9 +7,14 @@ export type Address = Mailbox | Mailbox[];
 
 type State = "initial" | "quoted" | "escaped" | "afterQuoted" | "bracketed" | "afterBracketed" | "unquoted" | "comment";
 
-const SPACE = /\p{White_Space}/u;
+const WHITE = /[\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
+const SPACES = "[\\t-\\r \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*";
+const PLAIN = `(?!${SPACES.slice(0, -1)})[^"<;,:(][^<;,:(]*`;
+const SIMPLE = new RegExp(`^${SPACES}(?:"([^"\\\\]*)"${SPACES}<([^>]*)>|(${PLAIN})<([^>]*)>|(${PLAIN}))${SPACES}$`);
 
-function list(chars: IterableIterator<string>, group: boolean): Address[] | null {
+const white = (char: string) => char === " " || (char >= "\t" && char <= "\r") || (char > "\x84" && WHITE.test(char));
+
+function list(value: string, cursor: { index: number }, group: boolean): Address[] | null {
   const result: Address[] = [];
   let state: State = "initial";
   let resume: State = "initial";
@@ -20,12 +25,13 @@ function list(chars: IterableIterator<string>, group: boolean): Address[] | null
   let empty = true;
   const push = (address: string) => address.includes("@") && result.push({ name, addr: address }) > 0;
   const members = () => {
-    const nested = group ? null : list(chars, true);
+    const nested = group ? null : list(value, cursor, true);
     return nested !== null && result.push(nested.flat()) > 0;
   };
-  for (const char of chars) {
+  while (cursor.index < value.length) {
+    const char = value.charAt(cursor.index++);
     empty = false;
-    const space = SPACE.test(char);
+    const space = white(char);
     switch (state) {
       case "initial":
         if (char === '"') {
@@ -106,6 +112,12 @@ function list(chars: IterableIterator<string>, group: boolean): Address[] | null
   return state === "initial" || state === "afterBracketed" ? result : null;
 }
 
-export const parse = (value: string) => list(value[Symbol.iterator](), false);
+export function parse(value: string): Address[] | null {
+  const simple = SIMPLE.exec(value);
+  if (!simple) return list(value, { index: 0 }, false);
+  const [, quoted, quotedAddr = "", plain = "", plainAddr = "", bare] = simple;
+  const mailbox = bare !== undefined ? { name: null, addr: bare.trimEnd() } : quoted !== undefined ? { name: quoted, addr: quotedAddr } : { name: plain.trimEnd(), addr: plainAddr };
+  return mailbox.addr.includes("@") ? [mailbox] : null;
+}
 
 export const format = ({ name, addr }: Mailbox) => (name === null ? addr : `"${name.replaceAll('"', '\\"')}" <${addr}>`);

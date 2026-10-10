@@ -4,7 +4,12 @@ export const asciiUpper = (value: string) => value.replace(/[a-z]+/g, (letters) 
 
 export const sameAscii = (left: string, right: string) => asciiLower(left) === asciiLower(right);
 
-export const collapse = (value: string) => value.split(/\p{White_Space}+/u).filter((word) => word).join(" ");
+const WHITESPACE = /[\t-\r \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/g;
+
+export function collapse(value: string) {
+  const spaced = value.replace(WHITESPACE, " ");
+  return spaced.slice(spaced.startsWith(" ") ? 1 : 0, spaced.endsWith(" ") ? -1 : spaced.length);
+}
 
 export const prefix = (value: string, count: number) => Array.from(value.slice(0, count * 2)).slice(0, count).join("");
 

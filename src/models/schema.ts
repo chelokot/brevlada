@@ -1,4 +1,4 @@
-import { ancestors, attribute, descendants, text, type Element } from "./dom";
+import { ancestors, attribute, type Document, descendants, type Element, text } from "./dom";
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -19,13 +19,12 @@ export function json(source: string): Json {
   }
 }
 
-export const scripts = (root: Element) =>
+export const scripts = (root: Document) =>
   descendants(root)
     .filter((element) => element.name === "script" && attribute(element, "type") === "application/ld+json")
-    .map((script) => json(text(script)))
-    .toArray();
+    .map((script) => json(text(script)));
 
-export const scopes = (root: Element) => descendants(root).filter((element) => attribute(element, "itemscope") !== null && attribute(element, "itemtype") !== null);
+export const scopes = (root: Document) => descendants(root).filter((element) => attribute(element, "itemscope") !== null && attribute(element, "itemtype") !== null);
 
 export const term = (value: string) => value.slice(Math.max(value.lastIndexOf("/"), value.lastIndexOf(":"), value.lastIndexOf("#")) + 1);
 

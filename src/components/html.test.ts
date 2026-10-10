@@ -17,10 +17,10 @@ test("full documents and unbalanced markup stay inside the measured root", () =>
   const root = descendants(tree).find((element) => element.attributes.some(([name, value]) => name === "id" && value === "brevlada-content"));
   if (!root) throw new Error("root expected");
   expect(text(root)).toContain("Bottom");
-  const inner = serialize(root.children, "div");
+  const inner = serialize(root.children);
   expect(inner).toContain("newsletter");
   expect(inner).toContain("background:blue");
-  expect(descendants(tree).filter((element) => element.name === "html").toArray().length).toBe(1);
+  expect(descendants(tree).filter((element) => element.name === "html").length).toBe(1);
   expect(html.indexOf("body{padding:0}")).toBeLessThan(html.indexOf(css));
   expect(html.match(/<div/g)?.length).toBe(html.match(/<\/div>/g)?.length);
 });
