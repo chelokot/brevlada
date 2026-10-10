@@ -21,6 +21,7 @@ function preserveInner(scroll: Gtk.ScrolledWindow, first: Gtk.Widget | null, cha
   for (let widget = first; widget && !anchor; widget = widget.get_next_sibling()) {
     const bounds = top(widget, scroll);
     if (bounds && bounds.get_y() + bounds.get_height() > 0) anchor = { widget: new WeakRef(widget), y: bounds.get_y() };
+    else if (widget.get_height() === 0) break;
   }
   change();
   let laidOut = false;
