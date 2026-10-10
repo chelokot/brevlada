@@ -1,25 +1,30 @@
 Brevlada
 
-Requires Rust 1.92 or newer, GTK 4.12 or newer, libadwaita 1.4 or newer,
-WebKitGTK 6.0, OpenSSL, pkg-config, glib-compile-resources, and xdg-open
-(xdg-utils) for opening links in the desktop's default browser.
+Requires Bun 1.4 or newer, GTK 4.12 or newer, libadwaita 1.4 or newer,
+WebKitGTK 6.0, GLib 2.80 or newer with libgirepository-2.0 and the GTK,
+libadwaita and WebKitGTK typelibs, and xdg-open (xdg-utils) for opening links
+in the desktop's default browser. GTK is reached through GObject Introspection
+from Bun's FFI, so no compiler, headers or pkg-config are needed.
 
-Fedora development packages:
-  gtk4-devel libadwaita-devel webkitgtk6.0-devel openssl-devel gcc
+Fedora packages:
+  gtk4 libadwaita webkitgtk6.0
 
-Build: cargo build
-Run: cargo run
-Format: cargo fmt
-Verify: cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings
+Install type definitions: bun install
+Run: bun start
+Type check: bun check
+Test: bun test (GTK tests need a display)
+Build a standalone executable: bun run build (writes dist/brevlada)
+Verify: bun check && bun test
 
 Flatpak
 
 Application ID: io.github.ExposedCat.Brevlada
-Runtime: org.gnome.Platform 50, with org.gnome.Sdk 50 for builds and the
-org.freedesktop.Sdk.Extension.rust-stable 25.08 build extension.
+Runtime: org.gnome.Platform 50, with org.gnome.Sdk 50 for builds. The manifest
+downloads a pinned Bun release by checksum and compiles the standalone
+executable with it; nothing else is fetched during the build.
 
 Install build dependencies:
-  flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50 org.freedesktop.Sdk.Extension.rust-stable//25.08
+  flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
 
 Build a local repository and distributable bundle from the current source tree:
   flatpak-builder --user --force-clean --repo=.flatpak/repo .flatpak/build io.github.ExposedCat.Brevlada.json
@@ -41,7 +46,7 @@ to an individual mail account. The desktop portal opens external links.
 Only Downloads/Brevlada is writable for opening and reusing email attachments.
 Saving elsewhere uses the desktop file picker. No broad host/home filesystem,
 shared IPC, audio, secret-service, unrestricted D-Bus,
-or host-command permissions are needed. The Rust extension is build-only.
+or host-command permissions are needed. Bun is only used at build time.
 
 GNOME Online Accounts and xdg-desktop-portal must be available on the host.
 The Flatpak cache is separate from the native cache, at
@@ -49,30 +54,25 @@ The Flatpak cache is separate from the native cache, at
 automatically without a filesystem permission. Existing mail is synced again;
 the native cache is not imported from outside the sandbox.
 
-Cargo dependencies are pinned by Cargo.lock and data/cargo-sources.json, with
-archive checksums. Compilation uses --frozen and has no network access. After
-changing Cargo.lock, regenerate the sources using flatpak-cargo-generator:
-  git clone https://github.com/flatpak/flatpak-builder-tools.git /tmp/brevlada-flatpak-builder-tools
-  python3 -m venv /tmp/brevlada-flatpak-generator-env
-  /tmp/brevlada-flatpak-generator-env/bin/pip install aiohttp tomlkit
-  /tmp/brevlada-flatpak-generator-env/bin/python /tmp/brevlada-flatpak-builder-tools/cargo/flatpak-cargo-generator.py Cargo.lock -o data/cargo-sources.json
+The application has no runtime npm dependencies; the dev dependencies are type
+definitions only, so the Flatpak build needs no package sources. Bun bundles
+the TypeScript, its Worker entry points and the bytecode cache into one
+executable, resolving the gi:// imports at build time.
 
-The directory source packages local edits and excludes native build artifacts
-and local Cargo configuration. For a Flathub submission, use a tagged source
-archive with a checksum or a pinned Git commit instead. Select a project
-license and add it to Cargo.toml, a license file, and the AppStream metadata
-before publishing; this repository does not currently declare a license.
+The directory source packages local edits and excludes build artifacts and
+node_modules. For a Flathub submission, use a tagged source archive with a
+checksum or a pinned Git commit instead. Select a project license and add it to
+package.json, a license file, and the AppStream metadata before publishing;
+this repository does not currently declare a license.
 
 Flatpak permission reference:
   https://docs.flatpak.org/en/latest/sandbox-permissions.html
-Cargo source generator:
-  https://github.com/flatpak/flatpak-builder-tools/tree/master/cargo
 
 GNOME Online Accounts must have a mail account configured. Configure accounts through the GNOME Settings Online Accounts panel.
 
 The SQLite cache remains at $XDG_DATA_HOME/brevlada/emails.db, defaulting to
-~/.local/share/brevlada/emails.db. Existing Python cache tables are imported
-once into Rust tables and retained. New cache records use account, folder,
+~/.local/share/brevlada/emails.db. Caches written by the Rust build (rust_*
+tables) are imported once into the current schema and retained. Records use account, folder,
 and UID together; UIDVALIDITY changes invalidate the affected folder cache.
 
 Background service
@@ -99,7 +99,7 @@ network failure and refreshing Online Accounts. IMAP IDLE is not implemented.
 Interactive folder/message loads and background caching run on separate workers.
 Background caching starts for all accounts at launch and checks again every five
 minutes. Four background workers allow up to two active requests per account.
-Background sync uses the persisted folder list in rust_sync_settings for each
+Background sync uses the persisted folder list in syncSettings for each
 account. Existing and new accounts default to INBOX only. Other cached folders
 are retained and remain available for interactive browsing. Additional selected
 folders use the same scheduler. Inboxes across all accounts take priority over
@@ -156,7 +156,7 @@ normalized text and sender groups, and discards superseded requests. Cache
 updates are coalesced, and result rows move into the GTK model without copying
 message bodies.
 
-Sender avatars are resolved once per address and cached in rust_avatars, with
+Sender avatars are resolved once per address and cached in avatars, with
 "this sender has no avatar" cached too so misses are not retried on every launch.
 Sources are tried in order: a connected Google account's own photo from its
 OpenID profile; Gravatar; then the sender domain's icon from Google's favicon
@@ -165,7 +165,7 @@ Online Accounts' OAuth client is not authorized for, so the first refusal
 disables contact lookups for that account for the session.
 
 Domain icons are skipped for addresses at public mailbox providers, listed in
-sender_domains.rs, so correspondents do not all wear their provider's logo. The
+sender-domains.ts, so correspondents do not all wear their provider's logo. The
 match is on the address's own host only, so a provider's own sending sub-domain
 still gets its brand icon. The same file maps bulk-mail domains to the brand
 they send for, because the icon service only knows the brand's main domain.
@@ -202,7 +202,7 @@ Avatars are resampled to twice the size they are drawn at before reaching the
 widget, because handing GTK a much larger image makes it minify in one step at
 draw time and the logo turns to mush. Senders with nothing anywhere keep the
 initials drawn by AdwAvatar. Changing a source or the plating clears the whole
-avatar cache once, via the avatar_sources key in rust_metadata.
+avatar cache once, via the avatar_sources key in metadata.
 
 Contact photos are not fetched. Online Accounts' Google credential cannot reach
 the People API at all, which answers SERVICE_DISABLED for every endpoint because
